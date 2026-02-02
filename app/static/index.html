@@ -15,7 +15,6 @@
     th { cursor: pointer; }
     .audio-cell audio { width: 160px; }
     .sort-indicator { font-size: 0.7rem; color: #999; margin-left: 4px; }
-    /* keep long text readable */
     td { vertical-align: top; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
   </style>
@@ -32,9 +31,11 @@
   </div>
 
   <div class="d-flex justify-content-between align-items-end mb-3">
-    <h1 class="h3">YCSEP DB Results</h1>
+    <h1 class="h3">YCSEP_v2</h1>
     <small class="text-muted text-end" style="max-width: 60%;">
-      This database contains transcript segments with associated audio from the <i>YouTube Corpus of Singapore English Podcasts</i>s. You can search by transcript text (e.g. <code>I just think</code>) or POS tags (e.g. <code>PRP RB VB</code>). Use the buttons to download a csv and audio for the current page. For more information about the resource, see Coats, Steven, Carmelo Alessandro Basile, Cameron Morin and Robert Fuchs. (2025). The YouTube Corpus of Singapore English Podcasts. <i>English World-Wide</i>. <a href="https://doi.org/10.1075/eww.25018.coa">https://doi.org/10.1075/eww.25018.coa</a>. A static version of the corpus is available at <a href="https://doi.org/10.7910/DVN/B7JRID">doi.org/10.7910/DVN/B7JRID</a>
+      This database contains transcript segments with associated audio from v2 of the <i>YouTube Corpus of Singapore English Podcasts</i>, transcribed with a fine-tuned ASR model (Coats et al., forthcoming). You can search by transcript text (e.g. <code>I just think</code>) or POS tags (e.g. <code>PRP RB VB</code>).
+      Use the button to download a CSV for the current page.
+      For more information about the resource, see Coats, Steven, Carmelo Alessandro Basile, Cameron Morin and Robert Fuchs. (2025). The YouTube Corpus of Singapore English Podcasts. <i>English World-Wide</i>. <a href="https://doi.org/10.1075/eww.25018.coa">https://doi.org/10.1075/eww.25018.coa</a>. A static version of the corpus is available at <a href="https://doi.org/10.7910/DVN/B7JRID">doi.org/10.7910/DVN/B7JRID</a>
     </small>
   </div>
 
@@ -57,7 +58,6 @@
   <!-- Download buttons (current page) -->
   <div class="mb-3 d-flex gap-2">
     <a id="csvBtn" href="#" class="btn btn-outline-success btn-sm d-none">Download CSV (Page)</a>
-    <a id="mp3Btn" href="#" class="btn btn-outline-primary btn-sm d-none">Download MP3s (Page)</a>
   </div>
 
   <div class="mb-2 text-muted" id="hitCount">Loading results...</div>
@@ -125,7 +125,7 @@
 
       const url = `/data?page=${currentPage}&size=${pageSize}` +
                   `&text=${encodeURIComponent(textVal)}` +
-                  `&sort=${currentSort}&direction=${currentDirection}` +
+                  `&sort=${encodeURIComponent(currentSort)}&direction=${encodeURIComponent(currentDirection)}` +
                   `&channels=${channelsParam}`;
 
       fetch(url)
@@ -142,15 +142,10 @@
 
     function updateDownloadLinks(textVal, channelsParam) {
       const csvBtn = document.getElementById('csvBtn');
-      const mp3Btn = document.getElementById('mp3Btn');
       csvBtn.href = `/download/csv?page=${currentPage}&size=${pageSize}` +
                     `&text=${encodeURIComponent(textVal)}` +
                     `&channels=${channelsParam}`;
-      mp3Btn.href = `/download/mp3zip?page=${currentPage}&size=${pageSize}` +
-                    `&text=${encodeURIComponent(textVal)}` +
-                    `&channels=${channelsParam}`;
       csvBtn.classList.remove('d-none');
-      mp3Btn.classList.remove('d-none');
     }
 
     function escapeHtml(s) {
@@ -167,9 +162,7 @@
       tbody.innerHTML = '';
 
       rows.forEach(r => {
-        // IMPORTANT FIX:
-        // Use the backend-provided audio_url from the segments DB.
-        // The old /audio/{id} endpoint returns 400 by design.
+        // Use backend-provided audio_url (direct public WAV URL + #t=start,end)
         const audioUrl = r.audio_url || '';
 
         const tr = document.createElement('tr');
@@ -242,7 +235,7 @@
       ul.appendChild(makeItem('‹', Math.max(1, currentPage - 1), currentPage === 1, false, 'Previous'));
 
       // Numbered pages with ellipses
-      const windowSize = 2; // show current ±2
+      const windowSize = 2;
       let start = Math.max(1, currentPage - windowSize);
       let end = Math.min(totalPages, currentPage + windowSize);
 

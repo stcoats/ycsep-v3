@@ -37,38 +37,46 @@ def get_paginated_data(text: str = Query("")):
     if not text:
         return {"total": 0, "data": []}
 
+    # 1. Finds the group 'grp' for every matching word
+    # 2. Selects ALL words that share those groups to rebuild the full phrases
     query = """
-        SELECT 
-            min(id) as id,
-            listagg(text, ' ' ORDER BY id) as text,
-            listagg(COALESCE(pos_tag, 'UNK'), ' ' ORDER BY id) as pos_tags,
-            channel,
-            speaker,
-            video_id,
-            file,
-            min(start_time) as start_time,
-            max(end_time) as end_time
-        FROM (
-            SELECT *, (id - row_number() OVER (ORDER BY id)) as grp
+        WITH matches AS (
+            SELECT DISTINCT video_id, (id - row_number() OVER (PARTITION BY video_id ORDER BY id)) as grp
             FROM data
             WHERE id IN (SELECT id FROM data WHERE fts_main_data.match_bm25(id, ?) IS NOT NULL)
         )
-        GROUP BY channel, speaker, video_id, file, grp
+        SELECT 
+            min(d.id) as id,
+            listagg(d.text, ' ' ORDER BY d.id) as text,
+            listagg(COALESCE(d.pos_tag, 'UNK'), ' ' ORDER BY d.id) as pos_tags,
+            d.channel,
+            d.speaker,
+            d.video_id,
+            d.file,
+            min(d.start_time) as start_time,
+            max(d.end_time) as end_time
+        FROM data d
+        JOIN matches m ON d.video_id = m.video_id 
+        AND (d.id - row_number() OVER (PARTITION BY d.video_id ORDER BY d.id)) = m.grp
+        GROUP BY d.channel, d.speaker, d.video_id, d.file, m.grp
         ORDER BY start_time ASC
         LIMIT 100
     """
     try:
         df = con.execute(query, [text]).df()
-        
         if df.empty:
             return {"total": 0, "data": []}
             
-        # Use 'file' for the audio URL as it contains the specific filename in Allas
-        df['audio_url'] = df.apply(lambda r: f"{ALLAS_AUDIO_BASE}{r['file']}#t={r['start_time']:.2f}", axis=1)
+        # Correctly formatted audio URL using the 'file' column from your schema
+        audio_base = "https://a3s.fi/swift/v1/YCSEP_v2/"
+        df['audio_url'] = df.apply(
+            lambda r: f"{audio_base}{r['file']}#t={float(r['start_time']):.2f}", 
+            axis=1
+        )
         
         return {"total": len(df), "data": df.to_dict(orient="records")}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e), "query": query})
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/audio/{id}")
 def get_audio(id: str):

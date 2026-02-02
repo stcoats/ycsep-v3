@@ -3,7 +3,6 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.duckdb_utils import get_connection
-import os
 
 app = FastAPI()
 
@@ -16,66 +15,124 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
+
 @app.get("/")
 def serve_index():
     return FileResponse("app/static/index.html")
 
-# Global connection with Rahti-specific memory limits
+
+# Global connection
 con = get_connection()
-ALLAS_AUDIO_BASE = "https://a3s.fi/swift/v1/YCSEP_v2/"
+
 
 @app.get("/channels")
 def get_channels():
+    """
+    Return distinct channels for checkbox filters.
+    Uses the segments DB (table: segments).
+    """
     try:
-        rows = con.execute("SELECT DISTINCT channel FROM data WHERE channel IS NOT NULL ORDER BY channel").fetchall()
+        rows = con.execute(
+            "SELECT DISTINCT channel FROM segments WHERE channel IS NOT NULL ORDER BY channel"
+        ).fetchall()
         return [r[0] for r in rows]
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-@app.get("/data")
-def get_paginated_data(text: str = Query("")):
-    if not text:
-        return {"total": 0, "data": []}
 
-    # Reconstructs phrases by finding all words in the same segment as the match
-    query = """
-        SELECT 
-            min(id) as id,
-            listagg(text, ' ' ORDER BY id) as text,
-            listagg(COALESCE(pos_tag, 'UNK'), ' ' ORDER BY id) as pos_tags,
-            channel,
-            speaker,
-            video_id,
-            file,
-            min(start_time) as start_time,
-            max(end_time) as end_time
-        FROM data
-        WHERE (video_id, start_time) IN (
-            SELECT DISTINCT video_id, start_time 
-            FROM data 
-            WHERE id IN (SELECT id FROM data WHERE fts_main_data.match_bm25(id, ?) IS NOT NULL)
-        )
-        GROUP BY channel, speaker, video_id, file, start_time
-        ORDER BY start_time ASC
-        LIMIT 100
+@app.get("/data")
+def get_paginated_data(
+    text: str = Query(""),
+    page: int = Query(1, ge=1),
+    size: int = Query(100, ge=1, le=500),
+    sort: str = Query("id"),
+    direction: str = Query("asc"),
+    channels: str = Query(""),
+):
+    """
+    Paginated segment-level results.
+
+    Expected table schema (your ycsep_v3_segments.duckdb):
+      segments(segment_id, channel, speaker, start_time, end_time, text, pos_tags, video_id, audio_url, ...)
+
+    Returns JSON:
+      {"total": <int>, "data": [ {id, channel, video_id, speaker, start_time, end_time, text, pos_tags, audio_url}, ... ]}
     """
     try:
-        df = con.execute(query, [text]).df()
-        
-        if df.empty:
-            return {"total": 0, "data": []}
-            
-        # Generates audio URLs using the 'file' column from your V2 schema
-        df['audio_url'] = df.apply(
-            lambda r: f"{ALLAS_AUDIO_BASE}{r['file']}#t={float(r['start_time']):.2f}", 
-            axis=1
-        )
-        
-        return {"total": len(df), "data": df.to_dict(orient="records")}
+        offset = (page - 1) * size
+        selected_channels = [c for c in channels.split(",") if c]
+
+        # Prevent ORDER BY injection
+        sort_map = {
+            "id": "segment_id",
+            "channel": "channel",
+            "video_id": "video_id",
+            "speaker": "speaker",
+            "start_time": "start_time",
+            "end_time": "end_time",
+            "text": "text",
+            "pos_tags": "pos_tags",
+        }
+        sort_col = sort_map.get(sort, "segment_id")
+        dir_sql = "DESC" if direction.lower() == "desc" else "ASC"
+
+        where_clauses = ["1=1"]
+        params = []
+
+        # Search: prefer FTS if available; fallback to LIKE if not.
+        use_fts = False
+        if text.strip():
+            try:
+                # If the FTS index exists, this view will exist
+                con.execute("SELECT 1 FROM fts_main_segments LIMIT 1;").fetchone()
+                use_fts = True
+            except Exception:
+                use_fts = False
+
+            if use_fts:
+                where_clauses.append("fts_main_segments.match_bm25(segment_id, ?) IS NOT NULL")
+                params.append(text)
+            else:
+                # Fallback: substring match on text and POS tags
+                where_clauses.append(
+                    "(lower(text) LIKE '%' || lower(?) || '%' OR lower(pos_tags) LIKE '%' || lower(?) || '%')"
+                )
+                params.extend([text, text])
+
+        if selected_channels:
+            where_clauses.append("channel IN (" + ",".join(["?"] * len(selected_channels)) + ")")
+            params.extend(selected_channels)
+
+        where_sql = " WHERE " + " AND ".join(where_clauses)
+
+        count_sql = f"SELECT count(*) FROM segments{where_sql};"
+        data_sql = f"""
+            SELECT
+                segment_id AS id,
+                channel,
+                video_id,
+                speaker,
+                start_time,
+                end_time,
+                text,
+                pos_tags,
+                audio_url
+            FROM segments
+            {where_sql}
+            ORDER BY {sort_col} {dir_sql}
+            LIMIT ? OFFSET ?;
+        """
+
+        total = int(con.execute(count_sql, params).fetchone()[0])
+        df = con.execute(data_sql, params + [size, offset]).df()
+
+        return {"total": total, "data": df.to_dict(orient="records")}
+
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+
 @app.get("/audio/{id}")
 def get_audio(id: str):
-    # Direct links are now used; this endpoint is a fallback/legacy
+    # Legacy endpoint: the frontend should use audio_url from /data.
     return JSONResponse(status_code=400, content={"detail": "Use audio_url from data response"})

@@ -15,9 +15,13 @@
     th { cursor: pointer; }
     .audio-cell audio { width: 160px; }
     .sort-indicator { font-size: 0.7rem; color: #999; margin-left: 4px; }
+    /* keep long text readable */
+    td { vertical-align: top; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
   </style>
 </head>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
 
 <body class="container">
 
@@ -149,104 +153,120 @@
       mp3Btn.classList.remove('d-none');
     }
 
+    function escapeHtml(s) {
+      return String(s ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
     function renderTable(rows) {
       const tbody = document.querySelector('#dataTable tbody');
       tbody.innerHTML = '';
+
       rows.forEach(r => {
-        const audioUrl = `/audio/${encodeURIComponent(r.id)}`;
+        // IMPORTANT FIX:
+        // Use the backend-provided audio_url from the segments DB.
+        // The old /audio/{id} endpoint returns 400 by design.
+        const audioUrl = r.audio_url || '';
+
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td>${r.id}</td>
-          <td>${r.channel || ''}</td>
-          <td>${r.video_id || ''}</td>
-          <td>${r.speaker || ''}</td>
-          <td>${r.start_time || ''}</td>
-          <td>${r.end_time || ''}</td>
+          <td>${escapeHtml(r.id)}</td>
+          <td>${escapeHtml(r.channel)}</td>
+          <td class="mono">${escapeHtml(r.video_id)}</td>
+          <td>${escapeHtml(r.speaker)}</td>
+          <td>${escapeHtml(r.start_time)}</td>
+          <td>${escapeHtml(r.end_time)}</td>
           <td class="audio-cell">
-            <audio controls preload="none">
-              <source src="${audioUrl}" type="audio/mpeg">
-            </audio>
+            ${audioUrl ? `
+              <audio controls preload="none">
+                <source src="${escapeHtml(audioUrl)}" type="audio/wav">
+              </audio>
+            ` : ''}
           </td>
-          <td>${r.text || ''}</td>
-          <td>${r.pos_tags || ''}</td>
+          <td>${escapeHtml(r.text)}</td>
+          <td class="mono">${escapeHtml(r.pos_tags)}</td>
         `;
         tbody.appendChild(tr);
       });
     }
 
     function renderPagination() {
-        const container = document.getElementById('paginationControls');
-        container.innerHTML = '';
-    
-        const totalPages = Math.ceil(totalRows / pageSize);
-        if (totalPages <= 1) return;
-    
-        const nav = document.createElement('nav');
-        nav.setAttribute('aria-label', 'Results pages');
-    
-        const ul = document.createElement('ul');
-        ul.className = 'pagination pagination-sm justify-content-center';
-    
-        const makeItem = (label, targetPage, disabled=false, active=false, ariaLabel=null) => {
-          const li = document.createElement('li');
-          li.className = 'page-item';
-          if (disabled) li.classList.add('disabled');
-          if (active) li.classList.add('active');
-    
-          const a = document.createElement('a');
-          a.className = 'page-link';
-          a.href = '#';
-          if (ariaLabel) a.setAttribute('aria-label', ariaLabel);
-          a.textContent = label;
-    
-          if (!disabled && !active) {
-            a.addEventListener('click', (e) => { e.preventDefault(); goPage(targetPage); });
-          }
-    
-          li.appendChild(a);
-          return li;
-        };
-    
-        const addEllipsis = () => {
-          const li = document.createElement('li');
-          li.className = 'page-item disabled';
-          const span = document.createElement('span');
-          span.className = 'page-link';
-          span.textContent = '…';
-          li.appendChild(span);
-          ul.appendChild(li);
-        };
-    
-        // First / Prev
-        ul.appendChild(makeItem('«', 1, currentPage === 1, false, 'First'));
-        ul.appendChild(makeItem('‹', Math.max(1, currentPage - 1), currentPage === 1, false, 'Previous'));
-    
-        // Numbered pages with ellipses
-        const windowSize = 2; // show current ±2
-        let start = Math.max(1, currentPage - windowSize);
-        let end = Math.min(totalPages, currentPage + windowSize);
-    
-        if (start > 1) {
-          ul.appendChild(makeItem('1', 1, false, currentPage === 1, 'Page 1'));
-          if (start > 2) addEllipsis();
+      const container = document.getElementById('paginationControls');
+      container.innerHTML = '';
+
+      const totalPages = Math.ceil(totalRows / pageSize);
+      if (totalPages <= 1) return;
+
+      const nav = document.createElement('nav');
+      nav.setAttribute('aria-label', 'Results pages');
+
+      const ul = document.createElement('ul');
+      ul.className = 'pagination pagination-sm justify-content-center';
+
+      const makeItem = (label, targetPage, disabled=false, active=false, ariaLabel=null) => {
+        const li = document.createElement('li');
+        li.className = 'page-item';
+        if (disabled) li.classList.add('disabled');
+        if (active) li.classList.add('active');
+
+        const a = document.createElement('a');
+        a.className = 'page-link';
+        a.href = '#';
+        if (ariaLabel) a.setAttribute('aria-label', ariaLabel);
+        a.textContent = label;
+
+        if (!disabled && !active) {
+          a.addEventListener('click', (e) => { e.preventDefault(); goPage(targetPage); });
         }
-    
-        for (let p = start; p <= end; p++) {
-          ul.appendChild(makeItem(String(p), p, false, p === currentPage, `Page ${p}`));
-        }
-    
-        if (end < totalPages) {
-          if (end < totalPages - 1) addEllipsis();
-          ul.appendChild(makeItem(String(totalPages), totalPages, false, currentPage === totalPages, `Page ${totalPages}`));
-        }
-    
-        // Next / Last
-        ul.appendChild(makeItem('›', Math.min(totalPages, currentPage + 1), currentPage === totalPages, false, 'Next'));
-        ul.appendChild(makeItem('»', totalPages, currentPage === totalPages, false, 'Last'));
-    
-        nav.appendChild(ul);
-        container.appendChild(nav);
+
+        li.appendChild(a);
+        return li;
+      };
+
+      const addEllipsis = () => {
+        const li = document.createElement('li');
+        li.className = 'page-item disabled';
+        const span = document.createElement('span');
+        span.className = 'page-link';
+        span.textContent = '…';
+        li.appendChild(span);
+        ul.appendChild(li);
+      };
+
+      // First / Prev
+      ul.appendChild(makeItem('«', 1, currentPage === 1, false, 'First'));
+      ul.appendChild(makeItem('‹', Math.max(1, currentPage - 1), currentPage === 1, false, 'Previous'));
+
+      // Numbered pages with ellipses
+      const windowSize = 2; // show current ±2
+      let start = Math.max(1, currentPage - windowSize);
+      let end = Math.min(totalPages, currentPage + windowSize);
+
+      if (start > 1) {
+        ul.appendChild(makeItem('1', 1, false, currentPage === 1, 'Page 1'));
+        if (start > 2) addEllipsis();
       }
+
+      for (let p = start; p <= end; p++) {
+        ul.appendChild(makeItem(String(p), p, false, p === currentPage, `Page ${p}`));
+      }
+
+      if (end < totalPages) {
+        if (end < totalPages - 1) addEllipsis();
+        ul.appendChild(makeItem(String(totalPages), totalPages, false, currentPage === totalPages, `Page ${totalPages}`));
+      }
+
+      // Next / Last
+      ul.appendChild(makeItem('›', Math.min(totalPages, currentPage + 1), currentPage === totalPages, false, 'Next'));
+      ul.appendChild(makeItem('»', totalPages, currentPage === totalPages, false, 'Last'));
+
+      nav.appendChild(ul);
+      container.appendChild(nav);
+    }
 
     function renderHitCount() {
       const counter = document.getElementById('hitCount');

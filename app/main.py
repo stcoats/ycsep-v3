@@ -37,7 +37,6 @@ def get_paginated_data(text: str = Query("")):
     if not text:
         return {"total": 0, "data": []}
 
-    # Added COALESCE to pos_tag to handle any unmapped words safely
     query = """
         SELECT 
             min(id) as id,
@@ -45,7 +44,8 @@ def get_paginated_data(text: str = Query("")):
             listagg(COALESCE(pos_tag, 'UNK'), ' ' ORDER BY id) as pos_tags,
             channel,
             speaker,
-            file as video_id,
+            video_id,
+            file,
             min(start_time) as start_time,
             max(end_time) as end_time
         FROM (
@@ -53,32 +53,22 @@ def get_paginated_data(text: str = Query("")):
             FROM data
             WHERE id IN (SELECT id FROM data WHERE fts_main_data.match_bm25(id, ?) IS NOT NULL)
         )
-        GROUP BY channel, speaker, video_id, grp
+        GROUP BY channel, speaker, video_id, file, grp
         ORDER BY start_time ASC
         LIMIT 100
     """
     try:
-        if con is None:
-            return JSONResponse(status_code=500, content={"error": "Database connection is None"})
-
         df = con.execute(query, [text]).df()
         
         if df.empty:
             return {"total": 0, "data": []}
             
-        df['audio_url'] = df.apply(lambda r: f"{ALLAS_AUDIO_BASE}{r['video_id']}#t={r['start_time']:.2f}", axis=1)
+        # Use 'file' for the audio URL as it contains the specific filename in Allas
+        df['audio_url'] = df.apply(lambda r: f"{ALLAS_AUDIO_BASE}{r['file']}#t={r['start_time']:.2f}", axis=1)
         
-        results = df.to_dict(orient="records")
-        return {"total": len(results), "data": results}
-        
+        return {"total": len(df), "data": df.to_dict(orient="records")}
     except Exception as e:
-        return JSONResponse(
-            status_code=500, 
-            content={
-                "error": str(e),
-                "query_attempted": query
-            }
-        )
+        return JSONResponse(status_code=500, content={"error": str(e), "query": query})
 
 @app.get("/audio/{id}")
 def get_audio(id: str):

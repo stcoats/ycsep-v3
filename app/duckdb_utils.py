@@ -4,14 +4,12 @@ import urllib.request
 
 
 def get_connection():
-    # NEW segments DB (served from Allas)
-    db_path = "/tmp/ycsep_v3_segments.duckdb"
+    # Segments DB (served from Allas)
     db_url = "https://a3s.fi/swift/v1/YCSEP_v2/ycsep_v4_segments.duckdb"
+    db_path = "/tmp/ycsep_v4_segments.duckdb"  # make this match the URL
 
     # Writable directory for DuckDB extensions in Rahti
     ext_path = "/tmp/duckdb_extensions"
-
-    # Create writable dir for extensions
     os.makedirs(ext_path, exist_ok=True)
 
     # Download the DB if it's not already in /tmp
@@ -26,13 +24,16 @@ def get_connection():
     con.execute("SET memory_limit='512MB';")
     con.execute("SET threads=1;")
 
-    # If the DB uses FTS, we want the extension available.
-    # This is safe to attempt; if it fails, main.py falls back to LIKE.
+    # Make FTS available in this connection if possible.
+    # INSTALL may fail in locked-down environments; LOAD may still succeed.
     try:
         con.execute("INSTALL fts;")
+    except Exception:
+        pass
+
+    try:
         con.execute("LOAD fts;")
     except Exception:
         pass
 
     return con
-

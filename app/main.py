@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from app.duckdb_utils import get_connection
 import io
 import re
+import json
 
 app = FastAPI()
 
@@ -26,60 +27,93 @@ def serve_index():
 # Global connection
 con = get_connection()
 
-# Try to make FTS available on THIS connection. If it doesn't work, we fall back safely.
-try:
-    con.execute("INSTALL fts;")
-except Exception:
-    pass
-try:
-    con.execute("LOAD fts;")
-except Exception:
-    pass
 
-
-# Cache whether FTS is usable; computing this once avoids doing a probe on every request.
-_FTS_USABLE = None
-
-
-def _fts_is_usable() -> bool:
+def _parse_channels(channels: str) -> list[str]:
     """
-    Returns True if the fts_main_segments macros created by create_fts_index(...)
-    exist AND can be called in this connection.
+    The frontend may send channels in a few annoying forms:
+      - "" (empty)
+      - "a,b,c"
+      - "[]" or '["a","b"]' (JSON)
+      - "null" / "undefined" / "None"
+    We treat all non-sensical / empty forms as "no channel filter".
     """
-    global _FTS_USABLE
-    if _FTS_USABLE is not None:
-        return _FTS_USABLE
+    if channels is None:
+        return []
 
-    try:
-        # Probe: if the macro exists and can be executed, this succeeds.
-        con.execute(
-            "SELECT fts_main_segments.match_bm25(segment_id, ?, fields:='text') "
-            "FROM segments LIMIT 1;",
-            ["probe"],
-        ).fetchone()
-        _FTS_USABLE = True
-    except Exception:
-        _FTS_USABLE = False
+    s = str(channels).strip()
+    if not s:
+        return []
 
-    return _FTS_USABLE
+    low = s.lower()
+    if low in {"[]", "null", "none", "undefined"}:
+        return []
+
+    # If it looks like JSON, try to parse it
+    if (s.startswith("[") and s.endswith("]")) or (s.startswith('"[') and s.endswith(']"')):
+        try:
+            parsed = json.loads(s)
+            if isinstance(parsed, list):
+                out = []
+                for x in parsed:
+                    if x is None:
+                        continue
+                    xs = str(x).strip()
+                    if xs and xs.lower() not in {"null", "none", "undefined"}:
+                        out.append(xs)
+                return out
+        except Exception:
+            # fall through to comma-split
+            pass
+
+    # Comma-separated
+    parts = [p.strip() for p in s.split(",")]
+    parts = [p for p in parts if p and p.lower() not in {"null", "none", "undefined"}]
+    return parts
 
 
-def _build_where_and_params_fts(text: str, channels: str):
+def _token_patterns(q: str) -> list[str]:
     """
-    FTS-based WHERE + params.
-    Note: some common words can behave like stopwords depending on how the index was built,
-    causing 0 hits even when the word exists. We handle that by falling back to regex if needed.
+    Build whole-token, case-insensitive regex patterns for each token in the query.
+    We split on whitespace.
     """
-    selected_channels = [c for c in channels.split(",") if c]
+    q = (q or "").strip()
+    if not q:
+        return []
+
+    tokens = [t for t in re.split(r"\s+", q) if t]
+    patterns = []
+    for t in tokens:
+        # Whole-token match: letters/digits define tokens.
+        # This matches 'whatever' in "whatever," and avoids matching inside "malaysia".
+        patterns.append(r"(?i)(^|[^a-z0-9])" + re.escape(t) + r"([^a-z0-9]|$)")
+    return patterns
+
+
+def _build_where_and_params(text: str, channels: str):
+    """
+    Correctness-first search:
+      - whole-token regex matching on text OR pos_tags
+      - supports multi-word queries by requiring ALL tokens to match (AND)
+    Channel filter is robust to junk input.
+    """
+    selected_channels = _parse_channels(channels)
+
     where_clauses = ["1=1"]
-    params = []
+    params: list[str] = []
 
     q = (text or "").strip()
     if q:
-        where_clauses.append(
-            "fts_main_segments.match_bm25(segment_id, ?, fields:='text') IS NOT NULL"
-        )
-        params.append(q)
+        patterns = _token_patterns(q)
+
+        # Require all tokens to appear somewhere in text/pos_tags
+        # (If you want OR semantics for multi-word queries, change AND -> OR below.)
+        token_clauses = []
+        for pat in patterns:
+            token_clauses.append("(regexp_matches(text, ?) OR regexp_matches(pos_tags, ?))")
+            params.extend([pat, pat])
+
+        if token_clauses:
+            where_clauses.append("(" + " AND ".join(token_clauses) + ")")
 
     if selected_channels:
         where_clauses.append("channel IN (" + ",".join(["?"] * len(selected_channels)) + ")")
@@ -87,121 +121,6 @@ def _build_where_and_params_fts(text: str, channels: str):
 
     where_sql = " WHERE " + " AND ".join(where_clauses)
     return where_sql, params
-
-
-def _build_where_and_params_regex(text: str, channels: str):
-    """
-    Regex-based whole-token WHERE + params.
-    This is the correctness fallback for cases where FTS returns 0 for stopword-like queries.
-    """
-    selected_channels = [c for c in channels.split(",") if c]
-    where_clauses = ["1=1"]
-    params = []
-
-    q = (text or "").strip()
-    if q:
-        # Whole-token, case-insensitive:
-        # matches "sia" as a token, not inside "malaysia"
-        pattern = r"(?i)(^|[^a-z0-9])" + re.escape(q) + r"([^a-z0-9]|$)"
-        where_clauses.append("(regexp_matches(text, ?) OR regexp_matches(pos_tags, ?))")
-        params.extend([pattern, pattern])
-
-    if selected_channels:
-        where_clauses.append("channel IN (" + ",".join(["?"] * len(selected_channels)) + ")")
-        params.extend(selected_channels)
-
-    where_sql = " WHERE " + " AND ".join(where_clauses)
-    return where_sql, params
-
-
-def _count_total(where_sql: str, params: list) -> int:
-    return int(con.execute(f"SELECT count(*) FROM segments{where_sql};", params).fetchone()[0])
-
-
-def _run_paged_query(where_sql: str, params: list, sort_col: str, dir_sql: str, size: int, offset: int):
-    data_sql = f"""
-        SELECT
-            segment_id AS id,
-            channel,
-            video_id,
-            speaker,
-            start_time,
-            end_time,
-            text,
-            pos_tags,
-            audio_url
-        FROM segments
-        {where_sql}
-        ORDER BY {sort_col} {dir_sql}
-        LIMIT ? OFFSET ?;
-    """
-    df = con.execute(data_sql, params + [size, offset]).df()
-    return df
-
-
-def _run_paged_query_with_fallback(text: str, channels: str, sort_col: str, dir_sql: str, size: int, offset: int):
-    """
-    Strategy:
-    - If FTS is usable and there's a query, try FTS first.
-    - If FTS returns 0 total, immediately retry with regex whole-token matching.
-      (This fixes "already" / other stopword-like cases without requiring DB rebuild.)
-    - If no query, just filter by channels (no need for fallback).
-    """
-    q = (text or "").strip()
-
-    if q and _fts_is_usable():
-        where_sql, params = _build_where_and_params_fts(q, channels)
-        total = _count_total(where_sql, params)
-        if total > 0:
-            df = _run_paged_query(where_sql, params, sort_col, dir_sql, size, offset)
-            return total, df
-
-        # FTS produced 0 hits: fallback to regex whole-token matching
-        where_sql, params = _build_where_and_params_regex(q, channels)
-        total = _count_total(where_sql, params)
-        df = _run_paged_query(where_sql, params, sort_col, dir_sql, size, offset)
-        return total, df
-
-    # No query or FTS not usable: regex builder (which also handles empty q fine)
-    where_sql, params = _build_where_and_params_regex(q, channels)
-    total = _count_total(where_sql, params)
-    df = _run_paged_query(where_sql, params, sort_col, dir_sql, size, offset)
-    return total, df
-
-
-def _run_csv_query_with_fallback(text: str, channels: str, size: int, offset: int):
-    q = (text or "").strip()
-
-    def run(where_sql, params):
-        query = f"""
-            SELECT
-                segment_id AS id,
-                channel,
-                video_id,
-                speaker,
-                start_time,
-                end_time,
-                text,
-                pos_tags,
-                audio_url
-            FROM segments
-            {where_sql}
-            ORDER BY segment_id ASC
-            LIMIT ? OFFSET ?;
-        """
-        return con.execute(query, params + [size, offset]).df()
-
-    if q and _fts_is_usable():
-        where_sql, params = _build_where_and_params_fts(q, channels)
-        total = _count_total(where_sql, params)
-        if total > 0:
-            return run(where_sql, params)
-
-        where_sql, params = _build_where_and_params_regex(q, channels)
-        return run(where_sql, params)
-
-    where_sql, params = _build_where_and_params_regex(q, channels)
-    return run(where_sql, params)
 
 
 @app.get("/channels")
@@ -240,14 +159,28 @@ def get_paginated_data(
         sort_col = sort_map.get(sort, "segment_id")
         dir_sql = "DESC" if direction.lower() == "desc" else "ASC"
 
-        total, df = _run_paged_query_with_fallback(
-            text=text,
-            channels=channels,
-            sort_col=sort_col,
-            dir_sql=dir_sql,
-            size=size,
-            offset=offset,
-        )
+        where_sql, params = _build_where_and_params(text, channels)
+
+        count_sql = f"SELECT count(*) FROM segments{where_sql};"
+        data_sql = f"""
+            SELECT
+                segment_id AS id,
+                channel,
+                video_id,
+                speaker,
+                start_time,
+                end_time,
+                text,
+                pos_tags,
+                audio_url
+            FROM segments
+            {where_sql}
+            ORDER BY {sort_col} {dir_sql}
+            LIMIT ? OFFSET ?;
+        """
+
+        total = int(con.execute(count_sql, params).fetchone()[0])
+        df = con.execute(data_sql, params + [size, offset]).df()
 
         return {"total": total, "data": df.to_dict(orient="records")}
 
@@ -267,13 +200,26 @@ def download_csv(
     """
     try:
         offset = (page - 1) * size
+        where_sql, params = _build_where_and_params(text, channels)
 
-        df = _run_csv_query_with_fallback(
-            text=text,
-            channels=channels,
-            size=size,
-            offset=offset,
-        )
+        query = f"""
+            SELECT
+                segment_id AS id,
+                channel,
+                video_id,
+                speaker,
+                start_time,
+                end_time,
+                text,
+                pos_tags,
+                audio_url
+            FROM segments
+            {where_sql}
+            ORDER BY segment_id ASC
+            LIMIT ? OFFSET ?;
+        """
+
+        df = con.execute(query, params + [size, offset]).df()
 
         buf = io.StringIO()
         df.to_csv(buf, index=False)

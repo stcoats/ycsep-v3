@@ -11,17 +11,23 @@
         href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css"
         crossorigin="anonymous">
   <style>
-    body { margin: 16px; font-size: 0.9rem; }
-    th { cursor: pointer; }
-    .sort-indicator { font-size: 0.7rem; color: #999; margin-left: 4px; }
+    /* ---- Global sizing / density ---- */
+    body { margin: 12px; font-size: 10.5px; }
+    .sort-indicator { font-size: 0.65rem; color: #999; margin-left: 4px; }
     td { vertical-align: top; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
-    /* Filter row inputs */
-    .filter-input { min-width: 110px; }
+    /* tighter table padding than Bootstrap's default table-sm */
+    .table-sm > :not(caption) > * > * { padding: 0.18rem 0.28rem; }
+
+    /* header cursor behavior */
+    th { cursor: pointer; }
     .filter-cell { cursor: default !important; }
 
-    /* Chips */
+    /* ---- Filter row inputs ---- */
+    .filter-input { min-width: 0; } /* IMPORTANT: don't force overflow */
+
+    /* ---- Chips ---- */
     .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
     .chip {
       display: inline-flex;
@@ -47,10 +53,10 @@
     }
     .chip .chip-x:hover { color: #fff; }
 
-    /* Highlight */
+    /* ---- Highlight ---- */
     mark.hl { padding: 0 0.08rem; border-radius: 0.2rem; }
 
-    /* Help icon */
+    /* ---- Help icon ---- */
     .help-icon {
       display: inline-flex;
       align-items: center;
@@ -67,34 +73,33 @@
     }
     .help-icon:hover { background: #f8f9fa; }
 
-    /* --- Custom audio controls --- */
-    .audio-box { display: flex; flex-direction: column; gap: 6px; min-width: 240px; }
-    .audio-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-    .audio-controls .btn { padding: 0.15rem 0.45rem; font-size: 0.8rem; }
-    .audio-time { font-size: 0.75rem; color: #666; min-width: 82px; text-align: right; }
-    .audio-range { width: 150px; }
-    .audio-range input[type="range"] { width: 150px; }
-    .audio-status { font-size: 0.75rem; color: #888; }
+    /* ---- Custom audio controls (shrink-friendly) ---- */
+    .audio-box { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .audio-controls { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+    .audio-controls .btn { padding: 0.12rem 0.35rem; font-size: 0.78rem; }
+    .audio-time { font-size: 0.72rem; color: #666; min-width: 66px; text-align: right; }
+    .audio-range { flex: 1 1 auto; min-width: 80px; }
+    .audio-range input[type="range"] { width: 100%; }
+    .audio-status { font-size: 0.72rem; color: #888; }
 
-    /* Responsive sizing:
-       - keep small columns constrained
-       - let Text expand to fill available width
-       - allow horizontal scroll on narrow screens */
+    /* ---- Table layout: make small columns content-sized, let Text wrap ---- */
     #dataTable { width: 100%; }
-
-    th.col-id, td.col-id { min-width: 140px; }
-    th.col-channel, td.col-channel { min-width: 170px; }
-    th.col-video, td.col-video { min-width: 140px; }
-    th.col-speaker, td.col-speaker { min-width: 120px; }
-    th.col-audio, td.col-audio { min-width: 270px; }
-    th.col-start, td.col-start { min-width: 90px; }
-    th.col-end, td.col-end { min-width: 90px; }
-    th.col-pos, td.col-pos { min-width: 220px; }
-
-    /* Text: big min-width so it feels wide, but it can expand freely */
-    th.col-text, td.col-text { min-width: 520px; }
+    th, td { white-space: nowrap; }                 /* keep small columns tight */
+    th.col-text, td.col-text { white-space: normal; } /* text wraps */
     td.col-text { overflow-wrap: anywhere; word-break: break-word; }
     td.col-pos { overflow-wrap: anywhere; word-break: break-word; }
+
+    /* content-sized columns */
+    th.col-id, td.col-id,
+    th.col-channel, td.col-channel,
+    th.col-video, td.col-video,
+    th.col-speaker, td.col-speaker,
+    th.col-audio, td.col-audio,
+    th.col-start, td.col-start,
+    th.col-end, td.col-end,
+    th.col-pos, td.col-pos {
+      width: 1%;
+    }
 
     /* Optional sticky header */
     /* thead { position: sticky; top: 0; z-index: 10; } */
@@ -103,7 +108,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
 
-<body class="container">
+<body class="container-fluid">
 
   <!-- Fair Use / Usage notice (always shown; dismissable) -->
   <div class="alert alert-warning alert-dismissible fade show text-center m-0 rounded-0" role="alert" style="z-index:1050;">
@@ -166,7 +171,7 @@
 
   <div class="mb-2 text-muted" id="hitCount">Loading results...</div>
 
-  <!-- KEY CHANGE: wrap in table-responsive so narrow screens scroll instead of crushing widths -->
+  <!-- responsive wrapper keeps layout sane on narrow screens -->
   <div class="table-responsive">
     <table class="table table-bordered table-striped table-hover table-sm" id="dataTable">
       <thead class="table-dark">

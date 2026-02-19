@@ -67,13 +67,13 @@
     }
     .help-icon:hover { background: #f8f9fa; }
 
-    /* --- Custom audio controls (Option 1) --- */
-    .audio-box { display: flex; flex-direction: column; gap: 6px; min-width: 210px; }
+    /* --- Custom audio controls --- */
+    .audio-box { display: flex; flex-direction: column; gap: 6px; min-width: 240px; }
     .audio-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-    .audio-controls .btn { padding: 0.15rem 0.4rem; font-size: 0.8rem; }
-    .audio-time { font-size: 0.75rem; color: #666; min-width: 66px; text-align: right; }
-    .audio-range { width: 140px; }
-    .audio-range input[type="range"] { width: 140px; }
+    .audio-controls .btn { padding: 0.15rem 0.45rem; font-size: 0.8rem; }
+    .audio-time { font-size: 0.75rem; color: #666; min-width: 82px; text-align: right; }
+    .audio-range { width: 150px; }
+    .audio-range input[type="range"] { width: 150px; }
     .audio-status { font-size: 0.75rem; color: #888; }
 
     /* Optional sticky header */
@@ -462,7 +462,7 @@
         .catch(err => console.error('Error fetching /data:', err));
     }
 
-    // --- audio helpers (segment parsing + custom controls) ---
+    // --- audio helpers ---
     function parseMediaFragment(url) {
       const s = String(url || "");
       const i = s.indexOf("#t=");
@@ -488,15 +488,12 @@
 
     function attachCustomAudioUI(boxEl, audioEl, baseUrl, start, end) {
       const btnPlay = boxEl.querySelector("[data-act='play']");
-      const btnReplay = boxEl.querySelector("[data-act='replay']");
       const range = boxEl.querySelector("input[type='range']");
       const timeEl = boxEl.querySelector("[data-role='time']");
       const statusEl = boxEl.querySelector("[data-role='status']");
       const dlBtn = boxEl.querySelector("[data-act='download']");
 
-      const duration = (start != null && end != null) ? (end - start) : null;
-
-      // Set up download (expects your /clip endpoint exists)
+      // Download mp3 (expects /clip endpoint)
       if (dlBtn && baseUrl && start != null && end != null) {
         const clipUrl = `/clip?url=${encodeURIComponent(baseUrl)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&fmt=mp3`;
         dlBtn.href = clipUrl;
@@ -506,7 +503,6 @@
         dlBtn.removeAttribute("href");
       }
 
-      // Load audio only when needed
       let loaded = false;
       function ensureLoaded() {
         if (loaded) return;
@@ -523,6 +519,17 @@
         btnPlay.textContent = isPlaying ? "Pause" : "Play";
       }
 
+      function seekToStart() {
+        if (start == null) return;
+        try { audioEl.currentTime = start; } catch (e) {}
+      }
+
+      function pauseAndResetToStart() {
+        audioEl.pause();
+        seekToStart();
+        setPlayLabel(false);
+      }
+
       function setRangeFromTime(current) {
         if (!range || start == null || end == null) return;
         const p = (current - start) / (end - start);
@@ -536,34 +543,20 @@
         timeEl.textContent = `${fmtTime(rel)} / ${fmtTime(end - start)}`;
       }
 
-      function seekToRel(relSeconds) {
-        if (start == null || end == null) return;
-        const t = Math.max(start, Math.min(end, start + relSeconds));
-        try { audioEl.currentTime = t; } catch (e) {}
-      }
-
-      function seekToStart() {
-        if (start == null) return;
-        try { audioEl.currentTime = start; } catch (e) {}
-      }
-
-      function pauseAndReset() {
-        audioEl.pause();
-        if (start != null) {
-          try { audioEl.currentTime = start; } catch (e) {}
-        }
-        setPlayLabel(false);
-      }
-
-      // Button handlers
+      // Play button: plays segment; after it finishes, pressing Play plays it again.
       if (btnPlay) {
         btnPlay.addEventListener("click", async () => {
           if (!baseUrl || start == null || end == null) return;
 
           ensureLoaded();
 
-          // If at/after end or before start, jump to start
-          if (audioEl.currentTime >= end - 0.05 || audioEl.currentTime < start - 0.05) {
+          // If we're at/after segment end, restart segment
+          if (audioEl.currentTime >= end - 0.05) {
+            seekToStart();
+          }
+
+          // If user somehow ended up before the segment, jump into it
+          if (audioEl.currentTime < start - 0.05) {
             seekToStart();
           }
 
@@ -582,63 +575,45 @@
         });
       }
 
-      if (btnReplay) {
-        btnReplay.addEventListener("click", async () => {
-          if (!baseUrl || start == null || end == null) return;
-
-          ensureLoaded();
-          seekToStart();
-          try {
-            await audioEl.play();
-            setPlayLabel(true);
-            setStatus("");
-          } catch (e) {
-            setStatus("Playback blocked.");
-          }
-        });
-      }
-
-      // Range: 0..1000 across the segment
+      // Slider seek within the segment
       if (range) {
         range.addEventListener("input", () => {
           if (start == null || end == null) return;
           const v = parseInt(range.value || "0", 10);
           const rel = ((Number.isFinite(v) ? v : 0) / 1000) * (end - start);
           ensureLoaded();
-          seekToRel(rel);
+          const t = Math.max(start, Math.min(end, start + rel));
+          try { audioEl.currentTime = t; } catch (e) {}
         });
       }
 
-      // Keep segment bounded + update UI
+      // Enforce segment boundaries + UI updates
       audioEl.addEventListener("timeupdate", () => {
         if (start == null || end == null) return;
 
         if (audioEl.currentTime >= end) {
-          pauseAndReset();
+          // stop at end and reset to start so next Play replays
+          pauseAndResetToStart();
           return;
         }
         if (audioEl.currentTime < start) {
           seekToStart();
         }
+
         setRangeFromTime(audioEl.currentTime);
         setTimeLabel(audioEl.currentTime);
       });
 
       audioEl.addEventListener("pause", () => setPlayLabel(false));
       audioEl.addEventListener("play", () => setPlayLabel(true));
-      audioEl.addEventListener("ended", () => pauseAndReset());
+      audioEl.addEventListener("ended", () => pauseAndResetToStart());
 
-      // Init labels
+      // init labels
       if (start != null && end != null) {
         if (timeEl) timeEl.textContent = `0:00 / ${fmtTime(end - start)}`;
         if (range) range.value = "0";
       } else {
         if (timeEl) timeEl.textContent = "--:-- / --:--";
-      }
-
-      // Provide a hint if the clip is absurdly long
-      if (duration != null && duration > 600) {
-        setStatus("Long clip");
       }
     }
 
@@ -655,18 +630,16 @@
         const textHtml = highlightText(r.text);
         const posHtml  = highlightText(r.pos_tags);
 
-        // Custom audio UI: no native controls (so no native download menu item)
-        const audioCellHtml = base ? `
+        const audioCellHtml = (base && start != null && end != null) ? `
           <div class="audio-box">
             <audio preload="none"></audio>
             <div class="audio-controls">
               <button type="button" class="btn btn-outline-primary btn-sm" data-act="play">Play</button>
-              <button type="button" class="btn btn-outline-secondary btn-sm" data-act="replay">Replay</button>
               <span class="audio-range">
                 <input type="range" min="0" max="1000" step="1" value="0" aria-label="Seek within clip">
               </span>
               <span class="audio-time" data-role="time">--:-- / --:--</span>
-              <a class="btn btn-outline-success btn-sm" data-act="download" href="#" role="button">Clip</a>
+              <a class="btn btn-outline-success btn-sm" data-act="download" href="#" role="button">Download mp3</a>
             </div>
             <div class="audio-status" data-role="status"></div>
           </div>
@@ -689,9 +662,7 @@
         if (base && start != null && end != null) {
           const box = tr.querySelector(".audio-box");
           const audioEl = tr.querySelector("audio");
-          if (box && audioEl) {
-            attachCustomAudioUI(box, audioEl, base, start, end);
-          }
+          if (box && audioEl) attachCustomAudioUI(box, audioEl, base, start, end);
         }
       });
     }

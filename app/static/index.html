@@ -13,7 +13,6 @@
   <style>
     body { margin: 16px; font-size: 0.9rem; }
     th { cursor: pointer; }
-    .audio-cell audio { width: 160px; }
     .sort-indicator { font-size: 0.7rem; color: #999; margin-left: 4px; }
     td { vertical-align: top; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
@@ -49,10 +48,7 @@
     .chip .chip-x:hover { color: #fff; }
 
     /* Highlight */
-    mark.hl {
-      padding: 0 0.08rem;
-      border-radius: 0.2rem;
-    }
+    mark.hl { padding: 0 0.08rem; border-radius: 0.2rem; }
 
     /* Help icon */
     .help-icon {
@@ -70,6 +66,15 @@
       background: #fff;
     }
     .help-icon:hover { background: #f8f9fa; }
+
+    /* --- Custom audio controls (Option 1) --- */
+    .audio-box { display: flex; flex-direction: column; gap: 6px; min-width: 210px; }
+    .audio-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .audio-controls .btn { padding: 0.15rem 0.4rem; font-size: 0.8rem; }
+    .audio-time { font-size: 0.75rem; color: #666; min-width: 66px; text-align: right; }
+    .audio-range { width: 140px; }
+    .audio-range input[type="range"] { width: 140px; }
+    .audio-status { font-size: 0.75rem; color: #888; }
 
     /* Optional sticky header */
     /* thead { position: sticky; top: 0; z-index: 10; } */
@@ -100,7 +105,6 @@
       <div class="d-flex align-items-center gap-2">
         <label for="searchInput" class="form-label m-0">Search text:</label>
 
-        <!-- Tiny help popup trigger -->
         <span id="helpBtn" class="help-icon" tabindex="0" role="button"
               data-bs-toggle="popover" data-bs-trigger="focus"
               data-bs-placement="right"
@@ -144,7 +148,6 @@
 
   <table class="table table-bordered table-striped table-hover table-sm" id="dataTable">
     <thead class="table-dark">
-      <!-- SORT HEADER ROW -->
       <tr>
         <th onclick="sortBy('id')">ID<span class="sort-indicator">▴▾</span></th>
         <th onclick="sortBy('channel')">Channel<span class="sort-indicator">▴▾</span></th>
@@ -157,7 +160,6 @@
         <th onclick="sortBy('pos_tags')">POS<span class="sort-indicator">▴▾</span></th>
       </tr>
 
-      <!-- FILTER ROW -->
       <tr>
         <th class="filter-cell">
           <input class="form-control form-control-sm filter-input" id="f_id" list="dl_id" placeholder="Filter…" autocomplete="off">
@@ -191,7 +193,7 @@
     <tbody></tbody>
   </table>
 
-  <!-- DATALISTS (autocomplete sources) -->
+  <!-- DATALISTS -->
   <datalist id="dl_id"></datalist>
   <datalist id="dl_channel"></datalist>
   <datalist id="dl_video_id"></datalist>
@@ -208,11 +210,9 @@
     let currentSort = 'id';
     let currentDirection = 'asc';
 
-    // Multi-select column filters: { col: ["A","B"] }
     let columnFilters = {};
     const FILTERABLE_COLS = ["id","channel","video_id","speaker","start_time","end_time"];
 
-    // Highlight patterns received from backend (/data)
     let highlightPatterns = [];
 
     function debounce(fn, ms=200) {
@@ -228,10 +228,7 @@
       return Array.from(boxes).map(cb => cb.value);
     }
 
-    function doSearch() {
-      currentPage = 1;
-      loadData();
-    }
+    function doSearch() { currentPage = 1; loadData(); }
 
     function sortBy(column) {
       if (currentSort === column) {
@@ -272,9 +269,7 @@
       if (!v) return;
 
       if (!columnFilters[col]) columnFilters[col] = [];
-      if (!columnFilters[col].includes(v)) {
-        columnFilters[col].push(v);
-      }
+      if (!columnFilters[col].includes(v)) columnFilters[col].push(v);
       renderChips(col);
     }
 
@@ -318,40 +313,23 @@
 
     function normalizePatternForJS(pat) {
       let s = String(pat || "");
-    
-      // JS RegExp does NOT support inline flags like (?i)
-      // Remove common inline flag groups.
-      // - handles (?i) at start
-      // - also removes things like (?im) if you ever add them
       s = s.replace(/\(\?[a-z]+\)/gi, "");
-    
       return s;
     }
-    
+
     function highlightText(plainText) {
       const s = String(plainText ?? "");
       if (!s) return "";
-    
-      if (!highlightPatterns || highlightPatterns.length === 0) {
-        return escapeHtml(s);
-      }
-    
-      // Escape first to avoid HTML injection
+      if (!highlightPatterns || highlightPatterns.length === 0) return escapeHtml(s);
+
       let html = escapeHtml(s);
-    
       const patterns = highlightPatterns.slice(0, 25);
-    
       for (const pat of patterns) {
         try {
           const src = normalizePatternForJS(pat);
-    
-          // Global + case-insensitive (backend already intended (?i))
           const re = new RegExp(src, "gi");
-    
           html = html.replace(re, (m) => `<mark class="hl">${m}</mark>`);
-        } catch (e) {
-          // ignore patterns JS can't compile
-        }
+        } catch (e) {}
       }
       return html;
     }
@@ -430,12 +408,7 @@
 
     function saveState() {
       try {
-        const state = {
-          columnFilters,
-          currentSort,
-          currentDirection,
-          pageSize
-        };
+        const state = { columnFilters, currentSort, currentDirection, pageSize };
         localStorage.setItem("ycsep_state", JSON.stringify(state));
       } catch (e) {}
     }
@@ -446,9 +419,7 @@
         if (!raw) return;
         const state = JSON.parse(raw);
         if (state && typeof state === "object") {
-          if (state.columnFilters && typeof state.columnFilters === "object") {
-            columnFilters = state.columnFilters;
-          }
+          if (state.columnFilters && typeof state.columnFilters === "object") columnFilters = state.columnFilters;
           if (state.currentSort) currentSort = state.currentSort;
           if (state.currentDirection) currentDirection = state.currentDirection;
           if (state.pageSize) pageSize = state.pageSize;
@@ -456,9 +427,17 @@
       } catch (e) {}
     }
 
+    function updateDownloadLinks(textVal, channelsParam, filtersParam) {
+      const csvBtn = document.getElementById('csvBtn');
+      csvBtn.href = `/download/csv?page=${currentPage}&size=${pageSize}` +
+                    `&text=${encodeURIComponent(textVal)}` +
+                    `&channels=${channelsParam}` +
+                    `&filters=${filtersParam}`;
+      csvBtn.classList.remove('d-none');
+    }
+
     function loadData() {
-      const inputEl = document.getElementById('searchInput');
-      const textVal = inputEl.value.trim();
+      const textVal = document.getElementById('searchInput').value.trim();
       const selected = getSelectedChannels();
       const channelsParam = encodeURIComponent(selected.join(','));
       const filtersParam = filtersToParam();
@@ -483,98 +462,239 @@
         .catch(err => console.error('Error fetching /data:', err));
     }
 
-    function updateDownloadLinks(textVal, channelsParam, filtersParam) {
-      const csvBtn = document.getElementById('csvBtn');
-      csvBtn.href = `/download/csv?page=${currentPage}&size=${pageSize}` +
-                    `&text=${encodeURIComponent(textVal)}` +
-                    `&channels=${channelsParam}` +
-                    `&filters=${filtersParam}`;
-      csvBtn.classList.remove('d-none');
+    // --- audio helpers (segment parsing + custom controls) ---
+    function parseMediaFragment(url) {
+      const s = String(url || "");
+      const i = s.indexOf("#t=");
+      if (i === -1) return { base: s, start: null, end: null };
+      const base = s.slice(0, i);
+      const frag = s.slice(i + 3);
+      const parts = frag.split(",");
+      const start = parts[0] ? parseFloat(parts[0]) : null;
+      const end = parts[1] ? parseFloat(parts[1]) : null;
+      return {
+        base,
+        start: Number.isFinite(start) ? start : null,
+        end: Number.isFinite(end) ? end : null
+      };
     }
 
-function parseMediaFragment(url) {
-  // expects ...#t=start,end
-  const s = String(url || "");
-  const i = s.indexOf("#t=");
-  if (i === -1) return { base: s, start: null, end: null };
+    function fmtTime(t) {
+      if (!Number.isFinite(t)) return "--:--";
+      const m = Math.floor(t / 60);
+      const s = Math.floor(t % 60);
+      return `${m}:${String(s).padStart(2, "0")}`;
+    }
 
-  const base = s.slice(0, i);
-  const frag = s.slice(i + 3); // after "#t="
-  const parts = frag.split(",");
-  const start = parts[0] ? parseFloat(parts[0]) : null;
-  const end = parts[1] ? parseFloat(parts[1]) : null;
-  return {
-    base,
-    start: Number.isFinite(start) ? start : null,
-    end: Number.isFinite(end) ? end : null
-  };
-}
+    function attachCustomAudioUI(boxEl, audioEl, baseUrl, start, end) {
+      const btnPlay = boxEl.querySelector("[data-act='play']");
+      const btnReplay = boxEl.querySelector("[data-act='replay']");
+      const range = boxEl.querySelector("input[type='range']");
+      const timeEl = boxEl.querySelector("[data-role='time']");
+      const statusEl = boxEl.querySelector("[data-role='status']");
+      const dlBtn = boxEl.querySelector("[data-act='download']");
 
-    function attachSegmentPlayback(audioEl, start, end) {
-      if (start == null || end == null) return;
-    
-      // If user hits play again while already at/after the end, jump back
-      audioEl.addEventListener("play", () => {
-        if (audioEl.currentTime >= end - 0.05 || audioEl.currentTime < start - 0.05) {
-          try { audioEl.currentTime = start; } catch (e) {}
-        }
-      });
-    
-      // Hard-stop at segment end (works even if browser ignores #t=end)
-      audioEl.addEventListener("timeupdate", () => {
-        if (audioEl.currentTime >= end) {
-          audioEl.pause();
-          try { audioEl.currentTime = start; } catch (e) {}
-        }
-      });
-    
-      // Some browsers fire ended on the full file; still reset to start
-      audioEl.addEventListener("ended", () => {
+      const duration = (start != null && end != null) ? (end - start) : null;
+
+      // Set up download (expects your /clip endpoint exists)
+      if (dlBtn && baseUrl && start != null && end != null) {
+        const clipUrl = `/clip?url=${encodeURIComponent(baseUrl)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&fmt=mp3`;
+        dlBtn.href = clipUrl;
+      } else if (dlBtn) {
+        dlBtn.classList.add("disabled");
+        dlBtn.setAttribute("aria-disabled", "true");
+        dlBtn.removeAttribute("href");
+      }
+
+      // Load audio only when needed
+      let loaded = false;
+      function ensureLoaded() {
+        if (loaded) return;
+        audioEl.src = baseUrl;
+        loaded = true;
+      }
+
+      function setStatus(msg) {
+        if (statusEl) statusEl.textContent = msg || "";
+      }
+
+      function setPlayLabel(isPlaying) {
+        if (!btnPlay) return;
+        btnPlay.textContent = isPlaying ? "Pause" : "Play";
+      }
+
+      function setRangeFromTime(current) {
+        if (!range || start == null || end == null) return;
+        const p = (current - start) / (end - start);
+        const val = Math.max(0, Math.min(1, p));
+        range.value = String(Math.round(val * 1000));
+      }
+
+      function setTimeLabel(current) {
+        if (!timeEl || start == null || end == null) return;
+        const rel = current - start;
+        timeEl.textContent = `${fmtTime(rel)} / ${fmtTime(end - start)}`;
+      }
+
+      function seekToRel(relSeconds) {
+        if (start == null || end == null) return;
+        const t = Math.max(start, Math.min(end, start + relSeconds));
+        try { audioEl.currentTime = t; } catch (e) {}
+      }
+
+      function seekToStart() {
+        if (start == null) return;
         try { audioEl.currentTime = start; } catch (e) {}
+      }
+
+      function pauseAndReset() {
+        audioEl.pause();
+        if (start != null) {
+          try { audioEl.currentTime = start; } catch (e) {}
+        }
+        setPlayLabel(false);
+      }
+
+      // Button handlers
+      if (btnPlay) {
+        btnPlay.addEventListener("click", async () => {
+          if (!baseUrl || start == null || end == null) return;
+
+          ensureLoaded();
+
+          // If at/after end or before start, jump to start
+          if (audioEl.currentTime >= end - 0.05 || audioEl.currentTime < start - 0.05) {
+            seekToStart();
+          }
+
+          if (audioEl.paused) {
+            try {
+              await audioEl.play();
+              setPlayLabel(true);
+              setStatus("");
+            } catch (e) {
+              setStatus("Playback blocked.");
+            }
+          } else {
+            audioEl.pause();
+            setPlayLabel(false);
+          }
+        });
+      }
+
+      if (btnReplay) {
+        btnReplay.addEventListener("click", async () => {
+          if (!baseUrl || start == null || end == null) return;
+
+          ensureLoaded();
+          seekToStart();
+          try {
+            await audioEl.play();
+            setPlayLabel(true);
+            setStatus("");
+          } catch (e) {
+            setStatus("Playback blocked.");
+          }
+        });
+      }
+
+      // Range: 0..1000 across the segment
+      if (range) {
+        range.addEventListener("input", () => {
+          if (start == null || end == null) return;
+          const v = parseInt(range.value || "0", 10);
+          const rel = ((Number.isFinite(v) ? v : 0) / 1000) * (end - start);
+          ensureLoaded();
+          seekToRel(rel);
+        });
+      }
+
+      // Keep segment bounded + update UI
+      audioEl.addEventListener("timeupdate", () => {
+        if (start == null || end == null) return;
+
+        if (audioEl.currentTime >= end) {
+          pauseAndReset();
+          return;
+        }
+        if (audioEl.currentTime < start) {
+          seekToStart();
+        }
+        setRangeFromTime(audioEl.currentTime);
+        setTimeLabel(audioEl.currentTime);
       });
+
+      audioEl.addEventListener("pause", () => setPlayLabel(false));
+      audioEl.addEventListener("play", () => setPlayLabel(true));
+      audioEl.addEventListener("ended", () => pauseAndReset());
+
+      // Init labels
+      if (start != null && end != null) {
+        if (timeEl) timeEl.textContent = `0:00 / ${fmtTime(end - start)}`;
+        if (range) range.value = "0";
+      } else {
+        if (timeEl) timeEl.textContent = "--:-- / --:--";
+      }
+
+      // Provide a hint if the clip is absurdly long
+      if (duration != null && duration > 600) {
+        setStatus("Long clip");
+      }
     }
 
     function renderTable(rows) {
-  const tbody = document.querySelector('#dataTable tbody');
-  tbody.innerHTML = '';
+      const tbody = document.querySelector('#dataTable tbody');
+      tbody.innerHTML = '';
 
-  rows.forEach(r => {
-    const audioUrl = r.audio_url || '';
-    const { base, start, end } = parseMediaFragment(audioUrl);
+      rows.forEach(r => {
+        const audioUrl = r.audio_url || '';
+        const { base, start, end } = parseMediaFragment(audioUrl);
 
-    const tr = document.createElement('tr');
+        const tr = document.createElement('tr');
 
-    const textHtml = highlightText(r.text);
-    const posHtml  = highlightText(r.pos_tags);
+        const textHtml = highlightText(r.text);
+        const posHtml  = highlightText(r.pos_tags);
 
-    tr.innerHTML = `
-      <td>${escapeHtml(r.id)}</td>
-      <td>${escapeHtml(r.channel)}</td>
-      <td class="mono">${escapeHtml(r.video_id)}</td>
-      <td>${escapeHtml(r.speaker)}</td>
-      <td>${escapeHtml(r.start_time)}</td>
-      <td>${escapeHtml(r.end_time)}</td>
-      <td class="audio-cell">
-        ${base ? `
-          <audio controls preload="none" data-start="${start ?? ''}" data-end="${end ?? ''}">
-            <source src="${escapeHtml(base)}" type="audio/wav">
-          </audio>
-        ` : ''}
-      </td>
-      <td>${textHtml}</td>
-      <td class="mono">${posHtml}</td>
-    `;
+        // Custom audio UI: no native controls (so no native download menu item)
+        const audioCellHtml = base ? `
+          <div class="audio-box">
+            <audio preload="none"></audio>
+            <div class="audio-controls">
+              <button type="button" class="btn btn-outline-primary btn-sm" data-act="play">Play</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-act="replay">Replay</button>
+              <span class="audio-range">
+                <input type="range" min="0" max="1000" step="1" value="0" aria-label="Seek within clip">
+              </span>
+              <span class="audio-time" data-role="time">--:-- / --:--</span>
+              <a class="btn btn-outline-success btn-sm" data-act="download" href="#" role="button">Clip</a>
+            </div>
+            <div class="audio-status" data-role="status"></div>
+          </div>
+        ` : '';
 
-    tbody.appendChild(tr);
+        tr.innerHTML = `
+          <td>${escapeHtml(r.id)}</td>
+          <td>${escapeHtml(r.channel)}</td>
+          <td class="mono">${escapeHtml(r.video_id)}</td>
+          <td>${escapeHtml(r.speaker)}</td>
+          <td>${escapeHtml(r.start_time)}</td>
+          <td>${escapeHtml(r.end_time)}</td>
+          <td class="audio-cell">${audioCellHtml}</td>
+          <td>${textHtml}</td>
+          <td class="mono">${posHtml}</td>
+        `;
 
-    // Attach segment behavior after element exists
-    const audioEl = tr.querySelector("audio");
-    if (audioEl && start != null && end != null) {
-      attachSegmentPlayback(audioEl, start, end);
+        tbody.appendChild(tr);
+
+        if (base && start != null && end != null) {
+          const box = tr.querySelector(".audio-box");
+          const audioEl = tr.querySelector("audio");
+          if (box && audioEl) {
+            attachCustomAudioUI(box, audioEl, base, start, end);
+          }
+        }
+      });
     }
-  });
-}
-
 
     function renderPagination() {
       const container = document.getElementById('paginationControls');
@@ -740,5 +860,3 @@ function parseMediaFragment(url) {
   </script>
 </body>
 </html>
-
-

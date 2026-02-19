@@ -20,7 +20,7 @@
 
     /* Filter row inputs */
     .filter-input { min-width: 110px; }
-    .filter-cell { cursor: default !important; } /* don't show sort cursor for filter row */
+    .filter-cell { cursor: default !important; }
 
     /* Chips */
     .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
@@ -48,7 +48,30 @@
     }
     .chip .chip-x:hover { color: #fff; }
 
-    /* Make header row "sticky" if you want (optional) */
+    /* Highlight */
+    mark.hl {
+      padding: 0 0.08rem;
+      border-radius: 0.2rem;
+    }
+
+    /* Help icon */
+    .help-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 1px solid #ced4da;
+      color: #495057;
+      font-size: 0.85rem;
+      cursor: pointer;
+      user-select: none;
+      background: #fff;
+    }
+    .help-icon:hover { background: #f8f9fa; }
+
+    /* Optional sticky header */
     /* thead { position: sticky; top: 0; z-index: 10; } */
   </style>
 </head>
@@ -74,10 +97,32 @@
 
   <div class="row mb-2">
     <div class="col-auto">
-      <label for="searchInput" class="form-label">Search text:</label>
-      <input type="text" id="searchInput" class="form-control" placeholder='Search text or POS tags (e.g. can can or "pos tag")'>
+      <div class="d-flex align-items-center gap-2">
+        <label for="searchInput" class="form-label m-0">Search text:</label>
+
+        <!-- Tiny help popup trigger -->
+        <span id="helpBtn" class="help-icon" tabindex="0" role="button"
+              data-bs-toggle="popover" data-bs-trigger="focus"
+              data-bs-placement="right"
+              data-bs-html="true"
+              title="Search syntax"
+              data-bs-content="
+                <div style='max-width: 340px'>
+                  <div class='mb-2'><strong>Words</strong>: <code>can</code> matches whole tokens (case-insensitive).</div>
+                  <div class='mb-2'><strong>AND</strong>: <code>can think</code> requires both tokens somewhere in the row.</div>
+                  <div class='mb-2'><strong>Phrase</strong>: <code>&quot;can can&quot;</code> matches the ordered token sequence.</div>
+                  <div class='mb-2'><strong>Wildcards</strong>: <code>can*</code>, <code>*ing</code>, <code>c*n</code> (within a token).</div>
+                  <div class='mb-2'><strong>Regex</strong>: <code>re:/pattern/</code> (advanced). Example: <code>re:/c[aeiou]n/</code>.</div>
+                  <div class='text-muted'>Matches are checked against <em>Text</em> or <em>POS</em>.</div>
+                </div>
+              ">?</span>
+      </div>
+
+      <input type="text" id="searchInput" class="form-control"
+             placeholder='Search text or POS tags (e.g. can* "can can" re:/c[aeiou]n/)'>
       <div class="form-text">Tip: column filters below persist while you sort and run text search.</div>
     </div>
+
     <div class="col-auto align-self-end d-flex gap-2">
       <button class="btn btn-primary" onclick="doSearch()">Search</button>
       <button class="btn btn-outline-secondary" onclick="clearAllFilters()">Clear all filters</button>
@@ -112,7 +157,7 @@
         <th onclick="sortBy('pos_tags')">POS<span class="sort-indicator">▴▾</span></th>
       </tr>
 
-      <!-- FILTER ROW (optional extras included: autocomplete + chips + multi-select) -->
+      <!-- FILTER ROW -->
       <tr>
         <th class="filter-cell">
           <input class="form-control form-control-sm filter-input" id="f_id" list="dl_id" placeholder="Filter…" autocomplete="off">
@@ -164,10 +209,11 @@
     let currentDirection = 'asc';
 
     // Multi-select column filters: { col: ["A","B"] }
-    // Backend expects JSON string in filters=...
     let columnFilters = {};
-
     const FILTERABLE_COLS = ["id","channel","video_id","speaker","start_time","end_time"];
+
+    // Highlight patterns received from backend (/data)
+    let highlightPatterns = [];
 
     function debounce(fn, ms=200) {
       let t;
@@ -270,6 +316,40 @@
         .replaceAll("'", '&#039;');
     }
 
+    // For highlighting we need HTML output, so we also escape text first.
+    function highlightText(plainText) {
+      const s = String(plainText ?? "");
+      if (!s) return "";
+
+      // If no highlight patterns, just escape
+      if (!highlightPatterns || highlightPatterns.length === 0) {
+        return escapeHtml(s);
+      }
+
+      // Escape first so we don't create HTML injection vectors.
+      let html = escapeHtml(s);
+
+      // Apply patterns in order, avoiding repeated heavy work.
+      // We keep it conservative: cap patterns and try/catch regex compilation.
+      const patterns = highlightPatterns.slice(0, 25);
+
+      for (const pat of patterns) {
+        try {
+          // If pattern already contains (?i), ignore case. Otherwise keep default.
+          // We don't force 'g' in constructor; JS regex needs it for replace.
+          const re = new RegExp(pat, "gi");
+
+          // Replace matches with <mark>. This highlights entire match span (boundaries included),
+          // which is acceptable for readability. If you want to highlight just the core token,
+          // you could add capture groups and rework the backend patterns.
+          html = html.replace(re, (m) => `<mark class="hl">${m}</mark>`);
+        } catch (e) {
+          // ignore bad patterns (should be rare with backend guardrails)
+        }
+      }
+      return html;
+    }
+
     const fetchSuggest = debounce((col, prefix) => {
       const textVal = document.getElementById('searchInput').value.trim();
       const selected = getSelectedChannels();
@@ -303,7 +383,6 @@
         const inp = document.getElementById(`f_${col}`);
         if (!inp) return;
 
-        // If filters exist (e.g., restored from localStorage), render chips
         renderChips(col);
 
         inp.addEventListener("input", (e) => {
@@ -311,10 +390,6 @@
           if (v.length >= 1) fetchSuggest(col, v);
         });
 
-        // "Commit" behavior:
-        // - Enter adds typed value as a chip
-        // - Change (select from datalist) adds as a chip
-        // - Escape clears the input box (doesn't clear chips)
         inp.addEventListener("keydown", (e) => {
           if (e.key === "Enter") {
             e.preventDefault();
@@ -326,7 +401,6 @@
             e.preventDefault();
             inp.value = "";
           } else if (e.key === "Backspace" && (inp.value || "").length === 0) {
-            // Optional: backspace on empty input pops last chip
             const vals = columnFilters[col] || [];
             if (vals.length) {
               removeFilterValue(col, vals[vals.length - 1]);
@@ -337,7 +411,6 @@
         });
 
         inp.addEventListener("change", (e) => {
-          // change fires when selecting from datalist as well
           const v = (e.target.value || "").trim();
           if (v) {
             addFilterValue(col, v);
@@ -349,7 +422,6 @@
       });
     }
 
-    // Optional persistence across reloads (can remove if you don't want it)
     function saveState() {
       try {
         const state = {
@@ -395,6 +467,7 @@
         .then(res => res.json())
         .then(json => {
           totalRows = json.total;
+          highlightPatterns = json.highlight || [];
           renderTable(json.data);
           renderPagination();
           renderHitCount();
@@ -420,6 +493,11 @@
       rows.forEach(r => {
         const audioUrl = r.audio_url || '';
         const tr = document.createElement('tr');
+
+        // Highlight only Text and POS (you can expand to other fields if you want)
+        const textHtml = highlightText(r.text);
+        const posHtml  = highlightText(r.pos_tags);
+
         tr.innerHTML = `
           <td>${escapeHtml(r.id)}</td>
           <td>${escapeHtml(r.channel)}</td>
@@ -434,8 +512,8 @@
               </audio>
             ` : ''}
           </td>
-          <td>${escapeHtml(r.text)}</td>
-          <td class="mono">${escapeHtml(r.pos_tags)}</td>
+          <td>${textHtml}</td>
+          <td class="mono">${posHtml}</td>
         `;
         tbody.appendChild(tr);
       });
@@ -484,11 +562,9 @@
         ul.appendChild(li);
       };
 
-      // First / Prev
       ul.appendChild(makeItem('«', 1, currentPage === 1, false, 'First'));
       ul.appendChild(makeItem('‹', Math.max(1, currentPage - 1), currentPage === 1, false, 'Previous'));
 
-      // Numbered pages with ellipses
       const windowSize = 2;
       let start = Math.max(1, currentPage - windowSize);
       let end = Math.min(totalPages, currentPage + windowSize);
@@ -507,7 +583,6 @@
         ul.appendChild(makeItem(String(totalPages), totalPages, false, currentPage === totalPages, `Page ${totalPages}`));
       }
 
-      // Next / Last
       ul.appendChild(makeItem('›', Math.min(totalPages, currentPage + 1), currentPage === totalPages, false, 'Next'));
       ul.appendChild(makeItem('»', totalPages, currentPage === totalPages, false, 'Last'));
 
@@ -519,13 +594,16 @@
       const counter = document.getElementById('hitCount');
       const parts = [];
 
-      // Show active chips summary (optional)
       const activeCols = FILTERABLE_COLS.filter(c => (columnFilters[c] || []).length);
       if (activeCols.length) {
         const chipsSummary = activeCols
           .map(c => `${c}=${(columnFilters[c] || []).length}`)
           .join(", ");
         parts.push(`Filters: ${chipsSummary}.`);
+      }
+
+      if (highlightPatterns && highlightPatterns.length) {
+        parts.push(`Highlighting: ${highlightPatterns.length} pattern(s).`);
       }
 
       parts.push(`${totalRows} results found.`);
@@ -547,7 +625,6 @@
             checkbox.classList.add('form-check-input', 'me-1');
             checkbox.value = c;
 
-            // optional persistence: if user unchecks, keep it on reload
             const saved = localStorage.getItem("ycsep_channels");
             if (saved) {
               try {
@@ -561,7 +638,6 @@
             }
 
             checkbox.addEventListener('change', () => {
-              // save
               try {
                 const selected = getSelectedChannels();
                 localStorage.setItem("ycsep_channels", JSON.stringify(selected));
@@ -577,20 +653,26 @@
         .catch(err => console.error('Failed to load channels:', err));
     }
 
+    function initHelpPopover() {
+      const el = document.getElementById("helpBtn");
+      if (!el) return;
+      // eslint-disable-next-line no-undef
+      new bootstrap.Popover(el);
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
       restoreState();
       loadChannels();
       initColumnFilters();
-      // re-render chips after restore
       FILTERABLE_COLS.forEach(renderChips);
 
+      initHelpPopover();
       loadData();
 
       document.getElementById('searchInput').addEventListener('keydown', e => {
         if (e.key === 'Enter') doSearch();
       });
 
-      // Optional: Ctrl/Cmd+K focuses global search
       document.addEventListener("keydown", (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
           e.preventDefault();

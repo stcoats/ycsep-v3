@@ -1,6 +1,8 @@
 # main.py
 from __future__ import annotations
 
+import subprocess
+import urllib.parse
 import io
 import json
 import re
@@ -464,6 +466,74 @@ def get_paginated_data(
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@app.get("/clip")
+def clip(
+    url: str = Query(..., description="Base audio URL (no #t fragment)"),
+    start: float = Query(..., ge=0),
+    end: float = Query(..., gt=0),
+    fmt: str = Query("mp3", pattern="^(mp3|wav)$"),
+):
+    """
+    Stream an audio clip cut from a remote URL using ffmpeg.
+    """
+    try:
+        if end <= start:
+            return JSONResponse(status_code=400, content={"error": "end must be > start"})
+
+        # safety guard (optional)
+        if end - start > 1800:  # 30 min
+            return JSONResponse(status_code=400, content={"error": "clip too long"})
+
+        parsed = urllib.parse.urlparse(url)
+        basename = parsed.path.rsplit("/", 1)[-1] or "audio"
+        stem = basename.rsplit(".", 1)[0]
+        out_name = f"{stem}_{start:.2f}_{end:.2f}.{fmt}"
+
+        if fmt == "mp3":
+            out_args = ["-f", "mp3", "-codec:a", "libmp3lame", "-q:a", "4"]
+            media_type = "audio/mpeg"
+        else:
+            out_args = ["-f", "wav", "-codec:a", "pcm_s16le"]
+            media_type = "audio/wav"
+
+        duration = end - start
+
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-ss", str(start),
+            "-i", url,
+            "-t", str(duration),
+            "-vn",
+            *out_args,
+            "pipe:1",
+        ]
+
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        def gen():
+            assert proc.stdout is not None
+            try:
+                while True:
+                    chunk = proc.stdout.read(1024 * 256)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                try:
+                    if proc.stdout:
+                        proc.stdout.close()
+                except Exception:
+                    pass
+                proc.wait()
+
+        headers = {"Content-Disposition": f'attachment; filename="{out_name}"'}
+        return StreamingResponse(gen(), media_type=media_type, headers=headers)
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 
 @app.get("/download/csv")
 def download_csv(
@@ -520,3 +590,4 @@ def get_audio(id: str):
         status_code=400,
         content={"detail": "Use audio_url from data response"},
     )
+

@@ -10,6 +10,7 @@
   <link rel="stylesheet"
         href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css"
         crossorigin="anonymous">
+
   <style>
     /* ---- Global sizing / density ---- */
     body { margin: 12px; font-size: 10.5px; }
@@ -17,17 +18,16 @@
     td { vertical-align: top; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
-    /* tighter table padding than Bootstrap's default table-sm */
+    /* tighter than Bootstrap table-sm */
     .table-sm > :not(caption) > * > * { padding: 0.18rem 0.28rem; }
 
-    /* header cursor behavior */
     th { cursor: pointer; }
     .filter-cell { cursor: default !important; }
 
-    /* ---- Filter row inputs ---- */
-    .filter-input { min-width: 0; } /* IMPORTANT: don't force overflow */
+    /* Filter row inputs */
+    .filter-input { min-width: 0; }
 
-    /* ---- Chips ---- */
+    /* Chips */
     .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
     .chip {
       display: inline-flex;
@@ -53,10 +53,10 @@
     }
     .chip .chip-x:hover { color: #fff; }
 
-    /* ---- Highlight ---- */
+    /* Highlight */
     mark.hl { padding: 0 0.08rem; border-radius: 0.2rem; }
 
-    /* ---- Help icon ---- */
+    /* Help icon */
     .help-icon {
       display: inline-flex;
       align-items: center;
@@ -73,36 +73,47 @@
     }
     .help-icon:hover { background: #f8f9fa; }
 
-    /* ---- Custom audio controls (shrink-friendly) ---- */
-    .audio-box { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-    .audio-controls { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
-    .audio-controls .btn { padding: 0.12rem 0.35rem; font-size: 0.78rem; }
-    .audio-time { font-size: 0.72rem; color: #666; min-width: 66px; text-align: right; }
-    .audio-range { flex: 1 1 auto; min-width: 80px; }
-    .audio-range input[type="range"] { width: 100%; }
-    .audio-status { font-size: 0.72rem; color: #888; }
-
-    /* ---- Table layout: make small columns content-sized, let Text wrap ---- */
+    /* ---- Table layout ---- */
     #dataTable { width: 100%; }
-    th, td { white-space: nowrap; }                 /* keep small columns tight */
-    th.col-text, td.col-text { white-space: normal; } /* text wraps */
+    /* keep small columns tight */
+    th, td { white-space: nowrap; }
+
+    /* allow wrapping for text + pos */
+    th.col-text, td.col-text { white-space: normal; }
     td.col-text { overflow-wrap: anywhere; word-break: break-word; }
+
+    th.col-pos, td.col-pos { white-space: normal; }
     td.col-pos { overflow-wrap: anywhere; word-break: break-word; }
 
-    /* content-sized columns */
+    /* content-sized columns (keeps gaps minimal) */
     th.col-id, td.col-id,
     th.col-channel, td.col-channel,
     th.col-video, td.col-video,
     th.col-speaker, td.col-speaker,
-    th.col-audio, td.col-audio,
     th.col-start, td.col-start,
     th.col-end, td.col-end,
-    th.col-pos, td.col-pos {
+    th.col-audio, td.col-audio {
       width: 1%;
     }
 
-    /* Optional sticky header */
-    /* thead { position: sticky; top: 0; z-index: 10; } */
+    /* Make Text wide (and allow it to expand) */
+    th.col-text, td.col-text { min-width: 620px; }
+
+    /* POS doesn’t need to be huge */
+    th.col-pos, td.col-pos { min-width: 160px; max-width: 260px; }
+
+    /* ---- Custom audio controls ---- */
+    .audio-box { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    /* allow wrapping to a 2nd row when needed */
+    .audio-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .audio-controls .btn { padding: 0.12rem 0.35rem; font-size: 0.78rem; }
+    .audio-time { font-size: 0.72rem; color: #666; min-width: 66px; text-align: right; }
+    .audio-range { flex: 1 1 140px; min-width: 120px; }
+    .audio-range input[type="range"] { width: 100%; }
+    .audio-status { font-size: 0.72rem; color: #888; }
+
+    /* shrink mp3 button */
+    .btn-mp3 { padding-left: 0.35rem; padding-right: 0.35rem; min-width: 0; }
   </style>
 </head>
 
@@ -110,7 +121,7 @@
 
 <body class="container-fluid">
 
-  <!-- Fair Use / Usage notice (always shown; dismissable) -->
+  <!-- Fair Use / Usage notice -->
   <div class="alert alert-warning alert-dismissible fade show text-center m-0 rounded-0" role="alert" style="z-index:1050;">
     <strong>Notice:</strong> This site contains copyrighted material made available for research, scholarship, and teaching under applicable laws (e.g., Singapore Copyright Act 2021; EU Directive 2019/790; U.S. 17 U.S.C. §107).
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
@@ -171,24 +182,23 @@
 
   <div class="mb-2 text-muted" id="hitCount">Loading results...</div>
 
-  <!-- responsive wrapper keeps layout sane on narrow screens -->
   <div class="table-responsive">
     <table class="table table-bordered table-striped table-hover table-sm" id="dataTable">
       <thead class="table-dark">
-        <!-- ORDER: ID, Channel, Video, Speaker, Audio, Text, Start, End, POS -->
+        <!-- ORDER: ID, Channel, Video, Speaker, Start, End, Audio, Text, POS -->
         <tr>
           <th class="col-id" onclick="sortBy('id')">ID<span class="sort-indicator">▴▾</span></th>
           <th class="col-channel" onclick="sortBy('channel')">Channel<span class="sort-indicator">▴▾</span></th>
           <th class="col-video" onclick="sortBy('video_id')">Video ID<span class="sort-indicator">▴▾</span></th>
           <th class="col-speaker" onclick="sortBy('speaker')">Speaker<span class="sort-indicator">▴▾</span></th>
-          <th class="col-audio">Audio</th>
-          <th class="col-text" onclick="sortBy('text')">Text<span class="sort-indicator">▴▾</span></th>
           <th class="col-start" onclick="sortBy('start_time')">Start<span class="sort-indicator">▴▾</span></th>
           <th class="col-end" onclick="sortBy('end_time')">End<span class="sort-indicator">▴▾</span></th>
+          <th class="col-audio">Audio</th>
+          <th class="col-text" onclick="sortBy('text')">Text<span class="sort-indicator">▴▾</span></th>
           <th class="col-pos" onclick="sortBy('pos_tags')">POS<span class="sort-indicator">▴▾</span></th>
         </tr>
 
-        <!-- FILTER ROW: only id/channel/video_id/speaker -->
+        <!-- FILTER ROW: id/channel/video_id/speaker only -->
         <tr>
           <th class="filter-cell col-id">
             <input class="form-control form-control-sm filter-input" id="f_id" list="dl_id" placeholder="Filter…" autocomplete="off">
@@ -206,10 +216,10 @@
             <input class="form-control form-control-sm filter-input" id="f_speaker" list="dl_speaker" placeholder="Filter…" autocomplete="off">
             <div class="chips" id="chips_speaker"></div>
           </th>
-          <th class="filter-cell col-audio"></th>
-          <th class="filter-cell col-text"></th>
           <th class="filter-cell col-start"></th>
           <th class="filter-cell col-end"></th>
+          <th class="filter-cell col-audio"></th>
+          <th class="filter-cell col-text"></th>
           <th class="filter-cell col-pos"></th>
         </tr>
       </thead>
@@ -562,6 +572,7 @@
 
           ensureLoaded();
 
+          // always replay the segment cleanly when pressing Play after it ended
           if (audioEl.currentTime >= end - 0.05 || audioEl.currentTime < start - 0.05) {
             seekToStart();
           }
@@ -639,7 +650,7 @@
                 <input type="range" min="0" max="1000" step="1" value="0" aria-label="Seek within clip">
               </span>
               <span class="audio-time" data-role="time">--:-- / --:--</span>
-              <a class="btn btn-outline-success btn-sm" data-act="download" href="#" role="button">Download mp3</a>
+              <a class="btn btn-outline-success btn-sm btn-mp3" data-act="download" href="#" role="button" title="Download mp3">mp3</a>
             </div>
             <div class="audio-status" data-role="status"></div>
           </div>
@@ -650,10 +661,10 @@
           <td class="col-channel">${escapeHtml(r.channel)}</td>
           <td class="col-video mono">${escapeHtml(r.video_id)}</td>
           <td class="col-speaker">${escapeHtml(r.speaker)}</td>
-          <td class="col-audio audio-cell">${audioCellHtml}</td>
-          <td class="col-text">${textHtml}</td>
           <td class="col-start">${escapeHtml(r.start_time)}</td>
           <td class="col-end">${escapeHtml(r.end_time)}</td>
+          <td class="col-audio audio-cell">${audioCellHtml}</td>
+          <td class="col-text">${textHtml}</td>
           <td class="col-pos mono">${posHtml}</td>
         `;
 

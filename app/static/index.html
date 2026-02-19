@@ -316,35 +316,41 @@
         .replaceAll("'", '&#039;');
     }
 
-    // For highlighting we need HTML output, so we also escape text first.
+    function normalizePatternForJS(pat) {
+      let s = String(pat || "");
+    
+      // JS RegExp does NOT support inline flags like (?i)
+      // Remove common inline flag groups.
+      // - handles (?i) at start
+      // - also removes things like (?im) if you ever add them
+      s = s.replace(/\(\?[a-z]+\)/gi, "");
+    
+      return s;
+    }
+    
     function highlightText(plainText) {
       const s = String(plainText ?? "");
       if (!s) return "";
-
-      // If no highlight patterns, just escape
+    
       if (!highlightPatterns || highlightPatterns.length === 0) {
         return escapeHtml(s);
       }
-
-      // Escape first so we don't create HTML injection vectors.
+    
+      // Escape first to avoid HTML injection
       let html = escapeHtml(s);
-
-      // Apply patterns in order, avoiding repeated heavy work.
-      // We keep it conservative: cap patterns and try/catch regex compilation.
+    
       const patterns = highlightPatterns.slice(0, 25);
-
+    
       for (const pat of patterns) {
         try {
-          // If pattern already contains (?i), ignore case. Otherwise keep default.
-          // We don't force 'g' in constructor; JS regex needs it for replace.
-          const re = new RegExp(pat, "gi");
-
-          // Replace matches with <mark>. This highlights entire match span (boundaries included),
-          // which is acceptable for readability. If you want to highlight just the core token,
-          // you could add capture groups and rework the backend patterns.
+          const src = normalizePatternForJS(pat);
+    
+          // Global + case-insensitive (backend already intended (?i))
+          const re = new RegExp(src, "gi");
+    
           html = html.replace(re, (m) => `<mark class="hl">${m}</mark>`);
         } catch (e) {
-          // ignore bad patterns (should be rare with backend guardrails)
+          // ignore patterns JS can't compile
         }
       }
       return html;
@@ -683,3 +689,4 @@
   </script>
 </body>
 </html>
+

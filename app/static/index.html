@@ -76,22 +76,25 @@
     .audio-range input[type="range"] { width: 150px; }
     .audio-status { font-size: 0.75rem; color: #888; }
 
-    /* Table sizing: make Text wider */
-    #dataTable { table-layout: fixed; width: 100%; }
-    /* Column widths (tweak as you like) */
-    th.col-id, td.col-id { width: 140px; }
-    th.col-channel, td.col-channel { width: 170px; }
-    th.col-video, td.col-video { width: 140px; }
-    th.col-speaker, td.col-speaker { width: 120px; }
-    th.col-audio, td.col-audio { width: 270px; }
-    th.col-text, td.col-text { width: 520px; }
-    th.col-start, td.col-start { width: 90px; }
-    th.col-end, td.col-end { width: 90px; }
-    th.col-pos, td.col-pos { width: 220px; }
+    /* Responsive sizing:
+       - keep small columns constrained
+       - let Text expand to fill available width
+       - allow horizontal scroll on narrow screens */
+    #dataTable { width: 100%; }
 
-    /* Ensure long text wraps nicely */
-    td.col-text { word-wrap: break-word; overflow-wrap: anywhere; }
-    td.col-pos { word-wrap: break-word; overflow-wrap: anywhere; }
+    th.col-id, td.col-id { min-width: 140px; }
+    th.col-channel, td.col-channel { min-width: 170px; }
+    th.col-video, td.col-video { min-width: 140px; }
+    th.col-speaker, td.col-speaker { min-width: 120px; }
+    th.col-audio, td.col-audio { min-width: 270px; }
+    th.col-start, td.col-start { min-width: 90px; }
+    th.col-end, td.col-end { min-width: 90px; }
+    th.col-pos, td.col-pos { min-width: 220px; }
+
+    /* Text: big min-width so it feels wide, but it can expand freely */
+    th.col-text, td.col-text { min-width: 520px; }
+    td.col-text { overflow-wrap: anywhere; word-break: break-word; }
+    td.col-pos { overflow-wrap: anywhere; word-break: break-word; }
 
     /* Optional sticky header */
     /* thead { position: sticky; top: 0; z-index: 10; } */
@@ -163,50 +166,53 @@
 
   <div class="mb-2 text-muted" id="hitCount">Loading results...</div>
 
-  <table class="table table-bordered table-striped table-hover table-sm" id="dataTable">
-    <thead class="table-dark">
-      <!-- NEW ORDER: ID, Channel, Video, Speaker, Audio, Text, Start, End, POS -->
-      <tr>
-        <th class="col-id" onclick="sortBy('id')">ID<span class="sort-indicator">▴▾</span></th>
-        <th class="col-channel" onclick="sortBy('channel')">Channel<span class="sort-indicator">▴▾</span></th>
-        <th class="col-video" onclick="sortBy('video_id')">Video ID<span class="sort-indicator">▴▾</span></th>
-        <th class="col-speaker" onclick="sortBy('speaker')">Speaker<span class="sort-indicator">▴▾</span></th>
-        <th class="col-audio">Audio</th>
-        <th class="col-text" onclick="sortBy('text')">Text<span class="sort-indicator">▴▾</span></th>
-        <th class="col-start" onclick="sortBy('start_time')">Start<span class="sort-indicator">▴▾</span></th>
-        <th class="col-end" onclick="sortBy('end_time')">End<span class="sort-indicator">▴▾</span></th>
-        <th class="col-pos" onclick="sortBy('pos_tags')">POS<span class="sort-indicator">▴▾</span></th>
-      </tr>
+  <!-- KEY CHANGE: wrap in table-responsive so narrow screens scroll instead of crushing widths -->
+  <div class="table-responsive">
+    <table class="table table-bordered table-striped table-hover table-sm" id="dataTable">
+      <thead class="table-dark">
+        <!-- ORDER: ID, Channel, Video, Speaker, Audio, Text, Start, End, POS -->
+        <tr>
+          <th class="col-id" onclick="sortBy('id')">ID<span class="sort-indicator">▴▾</span></th>
+          <th class="col-channel" onclick="sortBy('channel')">Channel<span class="sort-indicator">▴▾</span></th>
+          <th class="col-video" onclick="sortBy('video_id')">Video ID<span class="sort-indicator">▴▾</span></th>
+          <th class="col-speaker" onclick="sortBy('speaker')">Speaker<span class="sort-indicator">▴▾</span></th>
+          <th class="col-audio">Audio</th>
+          <th class="col-text" onclick="sortBy('text')">Text<span class="sort-indicator">▴▾</span></th>
+          <th class="col-start" onclick="sortBy('start_time')">Start<span class="sort-indicator">▴▾</span></th>
+          <th class="col-end" onclick="sortBy('end_time')">End<span class="sort-indicator">▴▾</span></th>
+          <th class="col-pos" onclick="sortBy('pos_tags')">POS<span class="sort-indicator">▴▾</span></th>
+        </tr>
 
-      <!-- FILTER ROW: remove start/end filters -->
-      <tr>
-        <th class="filter-cell col-id">
-          <input class="form-control form-control-sm filter-input" id="f_id" list="dl_id" placeholder="Filter…" autocomplete="off">
-          <div class="chips" id="chips_id"></div>
-        </th>
-        <th class="filter-cell col-channel">
-          <input class="form-control form-control-sm filter-input" id="f_channel" list="dl_channel" placeholder="Filter…" autocomplete="off">
-          <div class="chips" id="chips_channel"></div>
-        </th>
-        <th class="filter-cell col-video">
-          <input class="form-control form-control-sm filter-input" id="f_video_id" list="dl_video_id" placeholder="Filter…" autocomplete="off">
-          <div class="chips" id="chips_video_id"></div>
-        </th>
-        <th class="filter-cell col-speaker">
-          <input class="form-control form-control-sm filter-input" id="f_speaker" list="dl_speaker" placeholder="Filter…" autocomplete="off">
-          <div class="chips" id="chips_speaker"></div>
-        </th>
-        <th class="filter-cell col-audio"></th>
-        <th class="filter-cell col-text"></th>
-        <th class="filter-cell col-start"></th>
-        <th class="filter-cell col-end"></th>
-        <th class="filter-cell col-pos"></th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+        <!-- FILTER ROW: only id/channel/video_id/speaker -->
+        <tr>
+          <th class="filter-cell col-id">
+            <input class="form-control form-control-sm filter-input" id="f_id" list="dl_id" placeholder="Filter…" autocomplete="off">
+            <div class="chips" id="chips_id"></div>
+          </th>
+          <th class="filter-cell col-channel">
+            <input class="form-control form-control-sm filter-input" id="f_channel" list="dl_channel" placeholder="Filter…" autocomplete="off">
+            <div class="chips" id="chips_channel"></div>
+          </th>
+          <th class="filter-cell col-video">
+            <input class="form-control form-control-sm filter-input" id="f_video_id" list="dl_video_id" placeholder="Filter…" autocomplete="off">
+            <div class="chips" id="chips_video_id"></div>
+          </th>
+          <th class="filter-cell col-speaker">
+            <input class="form-control form-control-sm filter-input" id="f_speaker" list="dl_speaker" placeholder="Filter…" autocomplete="off">
+            <div class="chips" id="chips_speaker"></div>
+          </th>
+          <th class="filter-cell col-audio"></th>
+          <th class="filter-cell col-text"></th>
+          <th class="filter-cell col-start"></th>
+          <th class="filter-cell col-end"></th>
+          <th class="filter-cell col-pos"></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
 
-  <!-- DATALISTS (only for filterable columns now) -->
+  <!-- DATALISTS -->
   <datalist id="dl_id"></datalist>
   <datalist id="dl_channel"></datalist>
   <datalist id="dl_video_id"></datalist>
@@ -222,7 +228,6 @@
     let currentDirection = 'asc';
 
     let columnFilters = {};
-    // Only the genuinely useful filter columns
     const FILTERABLE_COLS = ["id","channel","video_id","speaker"];
 
     let highlightPatterns = [];
@@ -474,7 +479,6 @@
         .catch(err => console.error('Error fetching /data:', err));
     }
 
-    // --- audio helpers ---
     function parseMediaFragment(url) {
       const s = String(url || "");
       const i = s.indexOf("#t=");

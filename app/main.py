@@ -79,6 +79,51 @@ def _parse_channels(channels: Optional[str]) -> List[str]:
     parts = [p for p in parts if p and p.lower() not in {"null", "none", "undefined"}]
     return parts
 
+def _extract_phrases_and_terms(q: str) -> tuple[list[str], list[str]]:
+    """
+    Split query into:
+      - phrases inside double quotes:  "can can"
+      - remaining unquoted terms: can, can, etc.
+
+    Returns (phrases, terms).
+    """
+    q = (q or "").strip()
+    if not q:
+        return [], []
+
+    # Extract "..." phrases (no escaping support; simple and robust)
+    phrases = re.findall(r'"([^"]+)"', q)
+
+    # Remove quoted parts from the query, leaving unquoted terms
+    q_wo_phrases = re.sub(r'"[^"]+"', " ", q)
+    terms = [t for t in re.split(r"\s+", q_wo_phrases.strip()) if t]
+
+    return [p.strip() for p in phrases if p.strip()], terms
+
+
+def _whole_token_pattern(token: str) -> str:
+    token = token.strip()
+    return r"(?i)(^|[^a-z0-9])" + re.escape(token) + r"([^a-z0-9]|$)"
+
+
+def _phrase_pattern(phrase: str) -> str:
+    """
+    Build a case-insensitive regex that matches a sequence of whole tokens
+    in order, allowing non-alphanumeric separators between them.
+
+    Example: "can can" matches "can can", "can, can", "can  can", etc.
+    """
+    toks = [t for t in re.split(r"\s+", phrase.strip()) if t]
+    if not toks:
+        return ""
+
+    # Start boundary + tok1 + separators + tok2 + ... + end boundary
+    pat = r"(?i)(^|[^a-z0-9])" + re.escape(toks[0])
+    for t in toks[1:]:
+        pat += r"[^a-z0-9]+" + re.escape(t)
+    pat += r"([^a-z0-9]|$)"
+    return pat
+
 
 def _parse_csv_list(s: Optional[str]) -> List[str]:
     """
@@ -208,15 +253,36 @@ def _build_where_and_params(text: str, channels: str, filters_json: str) -> Tupl
 
     q = (text or "").strip()
     if q:
-        patterns = _token_patterns(q)
-
-        token_clauses: List[str] = []
-        for pat in patterns:
-            token_clauses.append("(regexp_matches(text, ?) OR regexp_matches(pos_tags, ?))")
+        phrases, terms = _extract_phrases_and_terms(q)
+    
+        # 1) Phrase constraints (ALL phrases must match somewhere)
+        phrase_clauses = []
+        for ph in phrases:
+            pat = _phrase_pattern(ph)
+            if pat:
+                phrase_clauses.append("(regexp_matches(text, ?) OR regexp_matches(pos_tags, ?))")
+                params.extend([pat, pat])
+    
+        # 2) Term constraints (ALL UNIQUE tokens must match somewhere)
+        # Dedup fixes: "can can" (unquoted) won't degrade to "can" via A AND A,
+        # it will explicitly become just one constraint on "can".
+        seen = set()
+        term_clauses = []
+        for t in terms:
+            tlow = t.lower()
+            if tlow in seen:
+                continue
+            seen.add(tlow)
+    
+            pat = _whole_token_pattern(t)
+            term_clauses.append("(regexp_matches(text, ?) OR regexp_matches(pos_tags, ?))")
             params.extend([pat, pat])
+    
+        # Combine: require ALL phrase matches AND ALL term matches
+        all_clauses = phrase_clauses + term_clauses
+        if all_clauses:
+            where_clauses.append("(" + " AND ".join(all_clauses) + ")")
 
-        if token_clauses:
-            where_clauses.append("(" + " AND ".join(token_clauses) + ")")
 
     if selected_channels:
         where_clauses.append("channel IN (" + ",".join(["?"] * len(selected_channels)) + ")")
@@ -397,3 +463,4 @@ def get_audio(id: str):
         status_code=400,
         content={"detail": "Use audio_url from data response"},
     )
+

@@ -17,6 +17,39 @@
     .sort-indicator { font-size: 0.7rem; color: #999; margin-left: 4px; }
     td { vertical-align: top; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+    /* Filter row inputs */
+    .filter-input { min-width: 110px; }
+    .filter-cell { cursor: default !important; } /* don't show sort cursor for filter row */
+
+    /* Chips */
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.18);
+      font-size: 0.78rem;
+      max-width: 100%;
+    }
+    .chip .chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+    .chip .chip-x {
+      border: 0;
+      background: transparent;
+      color: rgba(255,255,255,0.75);
+      line-height: 1;
+      padding: 0;
+      margin: 0;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+    .chip .chip-x:hover { color: #fff; }
+
+    /* Make header row "sticky" if you want (optional) */
+    /* thead { position: sticky; top: 0; z-index: 10; } */
   </style>
 </head>
 
@@ -43,9 +76,11 @@
     <div class="col-auto">
       <label for="searchInput" class="form-label">Search text:</label>
       <input type="text" id="searchInput" class="form-control" placeholder='Search text or POS tags (e.g. can can or "pos tag")'>
+      <div class="form-text">Tip: column filters below persist while you sort and run text search.</div>
     </div>
-    <div class="col-auto align-self-end">
+    <div class="col-auto align-self-end d-flex gap-2">
       <button class="btn btn-primary" onclick="doSearch()">Search</button>
+      <button class="btn btn-outline-secondary" onclick="clearAllFilters()">Clear all filters</button>
     </div>
   </div>
 
@@ -64,6 +99,7 @@
 
   <table class="table table-bordered table-striped table-hover table-sm" id="dataTable">
     <thead class="table-dark">
+      <!-- SORT HEADER ROW -->
       <tr>
         <th onclick="sortBy('id')">ID<span class="sort-indicator">▴▾</span></th>
         <th onclick="sortBy('channel')">Channel<span class="sort-indicator">▴▾</span></th>
@@ -75,9 +111,48 @@
         <th onclick="sortBy('text')">Text<span class="sort-indicator">▴▾</span></th>
         <th onclick="sortBy('pos_tags')">POS<span class="sort-indicator">▴▾</span></th>
       </tr>
+
+      <!-- FILTER ROW (optional extras included: autocomplete + chips + multi-select) -->
+      <tr>
+        <th class="filter-cell">
+          <input class="form-control form-control-sm filter-input" id="f_id" list="dl_id" placeholder="Filter…" autocomplete="off">
+          <div class="chips" id="chips_id"></div>
+        </th>
+        <th class="filter-cell">
+          <input class="form-control form-control-sm filter-input" id="f_channel" list="dl_channel" placeholder="Filter…" autocomplete="off">
+          <div class="chips" id="chips_channel"></div>
+        </th>
+        <th class="filter-cell">
+          <input class="form-control form-control-sm filter-input" id="f_video_id" list="dl_video_id" placeholder="Filter…" autocomplete="off">
+          <div class="chips" id="chips_video_id"></div>
+        </th>
+        <th class="filter-cell">
+          <input class="form-control form-control-sm filter-input" id="f_speaker" list="dl_speaker" placeholder="Filter…" autocomplete="off">
+          <div class="chips" id="chips_speaker"></div>
+        </th>
+        <th class="filter-cell">
+          <input class="form-control form-control-sm filter-input" id="f_start_time" list="dl_start_time" placeholder="Filter…" autocomplete="off">
+          <div class="chips" id="chips_start_time"></div>
+        </th>
+        <th class="filter-cell">
+          <input class="form-control form-control-sm filter-input" id="f_end_time" list="dl_end_time" placeholder="Filter…" autocomplete="off">
+          <div class="chips" id="chips_end_time"></div>
+        </th>
+        <th class="filter-cell"></th>
+        <th class="filter-cell"></th>
+        <th class="filter-cell"></th>
+      </tr>
     </thead>
     <tbody></tbody>
   </table>
+
+  <!-- DATALISTS (autocomplete sources) -->
+  <datalist id="dl_id"></datalist>
+  <datalist id="dl_channel"></datalist>
+  <datalist id="dl_video_id"></datalist>
+  <datalist id="dl_speaker"></datalist>
+  <datalist id="dl_start_time"></datalist>
+  <datalist id="dl_end_time"></datalist>
 
   <div class="d-flex justify-content-center my-3" id="paginationControls"></div>
 
@@ -87,6 +162,20 @@
     let pageSize = 100;
     let currentSort = 'id';
     let currentDirection = 'asc';
+
+    // Multi-select column filters: { col: ["A","B"] }
+    // Backend expects JSON string in filters=...
+    let columnFilters = {};
+
+    const FILTERABLE_COLS = ["id","channel","video_id","speaker","start_time","end_time"];
+
+    function debounce(fn, ms=200) {
+      let t;
+      return (...args) => {
+        clearTimeout(t);
+        t = setTimeout(() => fn(...args), ms);
+      };
+    }
 
     function getSelectedChannels() {
       const boxes = document.querySelectorAll('#channelCheckboxes input[type=checkbox]:checked');
@@ -117,35 +206,59 @@
       loadData();
     }
 
-    function loadData() {
-      const inputEl = document.getElementById('searchInput');
-      const textVal = inputEl.value.trim();
-      const selected = getSelectedChannels();
-      const channelsParam = encodeURIComponent(selected.join(','));
-
-      const url = `/data?page=${currentPage}&size=${pageSize}` +
-                  `&text=${encodeURIComponent(textVal)}` +
-                  `&sort=${encodeURIComponent(currentSort)}&direction=${encodeURIComponent(currentDirection)}` +
-                  `&channels=${channelsParam}`;
-
-      fetch(url)
-        .then(res => res.json())
-        .then(json => {
-          totalRows = json.total;
-          renderTable(json.data);
-          renderPagination();
-          renderHitCount();
-          updateDownloadLinks(textVal, channelsParam);
-        })
-        .catch(err => console.error('Error fetching /data:', err));
+    function filtersToParam() {
+      return encodeURIComponent(JSON.stringify(columnFilters || {}));
     }
 
-    function updateDownloadLinks(textVal, channelsParam) {
-      const csvBtn = document.getElementById('csvBtn');
-      csvBtn.href = `/download/csv?page=${currentPage}&size=${pageSize}` +
-                    `&text=${encodeURIComponent(textVal)}` +
-                    `&channels=${channelsParam}`;
-      csvBtn.classList.remove('d-none');
+    function clearAllFilters() {
+      columnFilters = {};
+      FILTERABLE_COLS.forEach(col => {
+        const inp = document.getElementById(`f_${col}`);
+        if (inp) inp.value = "";
+        renderChips(col);
+      });
+      currentPage = 1;
+      loadData();
+    }
+
+    function addFilterValue(col, value) {
+      const v = String(value || "").trim();
+      if (!v) return;
+
+      if (!columnFilters[col]) columnFilters[col] = [];
+      if (!columnFilters[col].includes(v)) {
+        columnFilters[col].push(v);
+      }
+      renderChips(col);
+    }
+
+    function removeFilterValue(col, value) {
+      if (!columnFilters[col]) return;
+      columnFilters[col] = columnFilters[col].filter(x => x !== value);
+      if (columnFilters[col].length === 0) delete columnFilters[col];
+      renderChips(col);
+    }
+
+    function renderChips(col) {
+      const holder = document.getElementById(`chips_${col}`);
+      if (!holder) return;
+      holder.innerHTML = "";
+      const vals = columnFilters[col] || [];
+      vals.forEach(v => {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.innerHTML = `
+          <span class="chip-text" title="${escapeHtml(v)}">${escapeHtml(v)}</span>
+          <button class="chip-x" aria-label="Remove" title="Remove">×</button>
+        `;
+        chip.querySelector(".chip-x").addEventListener("click", (e) => {
+          e.preventDefault();
+          removeFilterValue(col, v);
+          currentPage = 1;
+          loadData();
+        });
+        holder.appendChild(chip);
+      });
     }
 
     function escapeHtml(s) {
@@ -157,14 +270,155 @@
         .replaceAll("'", '&#039;');
     }
 
+    const fetchSuggest = debounce((col, prefix) => {
+      const textVal = document.getElementById('searchInput').value.trim();
+      const selected = getSelectedChannels();
+      const channelsParam = encodeURIComponent(selected.join(','));
+      const filtersParam = filtersToParam();
+
+      const url = `/suggest?col=${encodeURIComponent(col)}` +
+                  `&prefix=${encodeURIComponent(prefix)}` +
+                  `&text=${encodeURIComponent(textVal)}` +
+                  `&channels=${channelsParam}` +
+                  `&filters=${filtersParam}` +
+                  `&limit=20`;
+
+      fetch(url)
+        .then(r => r.json())
+        .then(values => {
+          const dl = document.getElementById(`dl_${col}`);
+          if (!dl) return;
+          dl.innerHTML = "";
+          (values || []).forEach(v => {
+            const opt = document.createElement("option");
+            opt.value = v;
+            dl.appendChild(opt);
+          });
+        })
+        .catch(err => console.error("suggest failed", err));
+    }, 200);
+
+    function initColumnFilters() {
+      FILTERABLE_COLS.forEach(col => {
+        const inp = document.getElementById(`f_${col}`);
+        if (!inp) return;
+
+        // If filters exist (e.g., restored from localStorage), render chips
+        renderChips(col);
+
+        inp.addEventListener("input", (e) => {
+          const v = e.target.value || "";
+          if (v.length >= 1) fetchSuggest(col, v);
+        });
+
+        // "Commit" behavior:
+        // - Enter adds typed value as a chip
+        // - Change (select from datalist) adds as a chip
+        // - Escape clears the input box (doesn't clear chips)
+        inp.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            addFilterValue(col, inp.value);
+            inp.value = "";
+            currentPage = 1;
+            loadData();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            inp.value = "";
+          } else if (e.key === "Backspace" && (inp.value || "").length === 0) {
+            // Optional: backspace on empty input pops last chip
+            const vals = columnFilters[col] || [];
+            if (vals.length) {
+              removeFilterValue(col, vals[vals.length - 1]);
+              currentPage = 1;
+              loadData();
+            }
+          }
+        });
+
+        inp.addEventListener("change", (e) => {
+          // change fires when selecting from datalist as well
+          const v = (e.target.value || "").trim();
+          if (v) {
+            addFilterValue(col, v);
+            inp.value = "";
+            currentPage = 1;
+            loadData();
+          }
+        });
+      });
+    }
+
+    // Optional persistence across reloads (can remove if you don't want it)
+    function saveState() {
+      try {
+        const state = {
+          columnFilters,
+          currentSort,
+          currentDirection,
+          pageSize
+        };
+        localStorage.setItem("ycsep_state", JSON.stringify(state));
+      } catch (e) {}
+    }
+
+    function restoreState() {
+      try {
+        const raw = localStorage.getItem("ycsep_state");
+        if (!raw) return;
+        const state = JSON.parse(raw);
+        if (state && typeof state === "object") {
+          if (state.columnFilters && typeof state.columnFilters === "object") {
+            columnFilters = state.columnFilters;
+          }
+          if (state.currentSort) currentSort = state.currentSort;
+          if (state.currentDirection) currentDirection = state.currentDirection;
+          if (state.pageSize) pageSize = state.pageSize;
+        }
+      } catch (e) {}
+    }
+
+    function loadData() {
+      const inputEl = document.getElementById('searchInput');
+      const textVal = inputEl.value.trim();
+      const selected = getSelectedChannels();
+      const channelsParam = encodeURIComponent(selected.join(','));
+      const filtersParam = filtersToParam();
+
+      const url = `/data?page=${currentPage}&size=${pageSize}` +
+                  `&text=${encodeURIComponent(textVal)}` +
+                  `&sort=${encodeURIComponent(currentSort)}&direction=${encodeURIComponent(currentDirection)}` +
+                  `&channels=${channelsParam}` +
+                  `&filters=${filtersParam}`;
+
+      fetch(url)
+        .then(res => res.json())
+        .then(json => {
+          totalRows = json.total;
+          renderTable(json.data);
+          renderPagination();
+          renderHitCount();
+          updateDownloadLinks(textVal, channelsParam, filtersParam);
+          saveState();
+        })
+        .catch(err => console.error('Error fetching /data:', err));
+    }
+
+    function updateDownloadLinks(textVal, channelsParam, filtersParam) {
+      const csvBtn = document.getElementById('csvBtn');
+      csvBtn.href = `/download/csv?page=${currentPage}&size=${pageSize}` +
+                    `&text=${encodeURIComponent(textVal)}` +
+                    `&channels=${channelsParam}` +
+                    `&filters=${filtersParam}`;
+      csvBtn.classList.remove('d-none');
+    }
+
     function renderTable(rows) {
       const tbody = document.querySelector('#dataTable tbody');
       tbody.innerHTML = '';
 
       rows.forEach(r => {
-        // Use backend-provided audio_url (direct public WAV URL + #t=start,end)
         const audioUrl = r.audio_url || '';
-
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>${escapeHtml(r.id)}</td>
@@ -263,7 +517,19 @@
 
     function renderHitCount() {
       const counter = document.getElementById('hitCount');
-      counter.textContent = `${totalRows} results found.`;
+      const parts = [];
+
+      // Show active chips summary (optional)
+      const activeCols = FILTERABLE_COLS.filter(c => (columnFilters[c] || []).length);
+      if (activeCols.length) {
+        const chipsSummary = activeCols
+          .map(c => `${c}=${(columnFilters[c] || []).length}`)
+          .join(", ");
+        parts.push(`Filters: ${chipsSummary}.`);
+      }
+
+      parts.push(`${totalRows} results found.`);
+      counter.textContent = parts.join(" ");
     }
 
     function loadChannels() {
@@ -275,12 +541,34 @@
           channels.forEach(c => {
             const label = document.createElement('label');
             label.classList.add('form-check', 'me-3');
+
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.classList.add('form-check-input', 'me-1');
             checkbox.value = c;
-            checkbox.checked = true;
-            checkbox.addEventListener('change', doSearch);
+
+            // optional persistence: if user unchecks, keep it on reload
+            const saved = localStorage.getItem("ycsep_channels");
+            if (saved) {
+              try {
+                const sel = JSON.parse(saved);
+                checkbox.checked = sel.includes(c);
+              } catch {
+                checkbox.checked = true;
+              }
+            } else {
+              checkbox.checked = true;
+            }
+
+            checkbox.addEventListener('change', () => {
+              // save
+              try {
+                const selected = getSelectedChannels();
+                localStorage.setItem("ycsep_channels", JSON.stringify(selected));
+              } catch (e) {}
+              doSearch();
+            });
+
             label.appendChild(checkbox);
             label.appendChild(document.createTextNode(c));
             container.appendChild(label);
@@ -290,10 +578,24 @@
     }
 
     window.addEventListener('DOMContentLoaded', () => {
+      restoreState();
       loadChannels();
+      initColumnFilters();
+      // re-render chips after restore
+      FILTERABLE_COLS.forEach(renderChips);
+
       loadData();
+
       document.getElementById('searchInput').addEventListener('keydown', e => {
         if (e.key === 'Enter') doSearch();
+      });
+
+      // Optional: Ctrl/Cmd+K focuses global search
+      document.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+          e.preventDefault();
+          document.getElementById("searchInput")?.focus();
+        }
       });
     });
   </script>

@@ -76,6 +76,23 @@
     .audio-range input[type="range"] { width: 150px; }
     .audio-status { font-size: 0.75rem; color: #888; }
 
+    /* Table sizing: make Text wider */
+    #dataTable { table-layout: fixed; width: 100%; }
+    /* Column widths (tweak as you like) */
+    th.col-id, td.col-id { width: 140px; }
+    th.col-channel, td.col-channel { width: 170px; }
+    th.col-video, td.col-video { width: 140px; }
+    th.col-speaker, td.col-speaker { width: 120px; }
+    th.col-audio, td.col-audio { width: 270px; }
+    th.col-text, td.col-text { width: 520px; }
+    th.col-start, td.col-start { width: 90px; }
+    th.col-end, td.col-end { width: 90px; }
+    th.col-pos, td.col-pos { width: 220px; }
+
+    /* Ensure long text wraps nicely */
+    td.col-text { word-wrap: break-word; overflow-wrap: anywhere; }
+    td.col-pos { word-wrap: break-word; overflow-wrap: anywhere; }
+
     /* Optional sticky header */
     /* thead { position: sticky; top: 0; z-index: 10; } */
   </style>
@@ -148,58 +165,52 @@
 
   <table class="table table-bordered table-striped table-hover table-sm" id="dataTable">
     <thead class="table-dark">
+      <!-- NEW ORDER: ID, Channel, Video, Speaker, Audio, Text, Start, End, POS -->
       <tr>
-        <th onclick="sortBy('id')">ID<span class="sort-indicator">▴▾</span></th>
-        <th onclick="sortBy('channel')">Channel<span class="sort-indicator">▴▾</span></th>
-        <th onclick="sortBy('video_id')">Video ID<span class="sort-indicator">▴▾</span></th>
-        <th onclick="sortBy('speaker')">Speaker<span class="sort-indicator">▴▾</span></th>
-        <th onclick="sortBy('start_time')">Start<span class="sort-indicator">▴▾</span></th>
-        <th onclick="sortBy('end_time')">End<span class="sort-indicator">▴▾</span></th>
-        <th>Audio</th>
-        <th onclick="sortBy('text')">Text<span class="sort-indicator">▴▾</span></th>
-        <th onclick="sortBy('pos_tags')">POS<span class="sort-indicator">▴▾</span></th>
+        <th class="col-id" onclick="sortBy('id')">ID<span class="sort-indicator">▴▾</span></th>
+        <th class="col-channel" onclick="sortBy('channel')">Channel<span class="sort-indicator">▴▾</span></th>
+        <th class="col-video" onclick="sortBy('video_id')">Video ID<span class="sort-indicator">▴▾</span></th>
+        <th class="col-speaker" onclick="sortBy('speaker')">Speaker<span class="sort-indicator">▴▾</span></th>
+        <th class="col-audio">Audio</th>
+        <th class="col-text" onclick="sortBy('text')">Text<span class="sort-indicator">▴▾</span></th>
+        <th class="col-start" onclick="sortBy('start_time')">Start<span class="sort-indicator">▴▾</span></th>
+        <th class="col-end" onclick="sortBy('end_time')">End<span class="sort-indicator">▴▾</span></th>
+        <th class="col-pos" onclick="sortBy('pos_tags')">POS<span class="sort-indicator">▴▾</span></th>
       </tr>
 
+      <!-- FILTER ROW: remove start/end filters -->
       <tr>
-        <th class="filter-cell">
+        <th class="filter-cell col-id">
           <input class="form-control form-control-sm filter-input" id="f_id" list="dl_id" placeholder="Filter…" autocomplete="off">
           <div class="chips" id="chips_id"></div>
         </th>
-        <th class="filter-cell">
+        <th class="filter-cell col-channel">
           <input class="form-control form-control-sm filter-input" id="f_channel" list="dl_channel" placeholder="Filter…" autocomplete="off">
           <div class="chips" id="chips_channel"></div>
         </th>
-        <th class="filter-cell">
+        <th class="filter-cell col-video">
           <input class="form-control form-control-sm filter-input" id="f_video_id" list="dl_video_id" placeholder="Filter…" autocomplete="off">
           <div class="chips" id="chips_video_id"></div>
         </th>
-        <th class="filter-cell">
+        <th class="filter-cell col-speaker">
           <input class="form-control form-control-sm filter-input" id="f_speaker" list="dl_speaker" placeholder="Filter…" autocomplete="off">
           <div class="chips" id="chips_speaker"></div>
         </th>
-        <th class="filter-cell">
-          <input class="form-control form-control-sm filter-input" id="f_start_time" list="dl_start_time" placeholder="Filter…" autocomplete="off">
-          <div class="chips" id="chips_start_time"></div>
-        </th>
-        <th class="filter-cell">
-          <input class="form-control form-control-sm filter-input" id="f_end_time" list="dl_end_time" placeholder="Filter…" autocomplete="off">
-          <div class="chips" id="chips_end_time"></div>
-        </th>
-        <th class="filter-cell"></th>
-        <th class="filter-cell"></th>
-        <th class="filter-cell"></th>
+        <th class="filter-cell col-audio"></th>
+        <th class="filter-cell col-text"></th>
+        <th class="filter-cell col-start"></th>
+        <th class="filter-cell col-end"></th>
+        <th class="filter-cell col-pos"></th>
       </tr>
     </thead>
     <tbody></tbody>
   </table>
 
-  <!-- DATALISTS -->
+  <!-- DATALISTS (only for filterable columns now) -->
   <datalist id="dl_id"></datalist>
   <datalist id="dl_channel"></datalist>
   <datalist id="dl_video_id"></datalist>
   <datalist id="dl_speaker"></datalist>
-  <datalist id="dl_start_time"></datalist>
-  <datalist id="dl_end_time"></datalist>
 
   <div class="d-flex justify-content-center my-3" id="paginationControls"></div>
 
@@ -211,7 +222,8 @@
     let currentDirection = 'asc';
 
     let columnFilters = {};
-    const FILTERABLE_COLS = ["id","channel","video_id","speaker","start_time","end_time"];
+    // Only the genuinely useful filter columns
+    const FILTERABLE_COLS = ["id","channel","video_id","speaker"];
 
     let highlightPatterns = [];
 
@@ -493,7 +505,6 @@
       const statusEl = boxEl.querySelector("[data-role='status']");
       const dlBtn = boxEl.querySelector("[data-act='download']");
 
-      // Download mp3 (expects /clip endpoint)
       if (dlBtn && baseUrl && start != null && end != null) {
         const clipUrl = `/clip?url=${encodeURIComponent(baseUrl)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&fmt=mp3`;
         dlBtn.href = clipUrl;
@@ -510,14 +521,8 @@
         loaded = true;
       }
 
-      function setStatus(msg) {
-        if (statusEl) statusEl.textContent = msg || "";
-      }
-
-      function setPlayLabel(isPlaying) {
-        if (!btnPlay) return;
-        btnPlay.textContent = isPlaying ? "Pause" : "Play";
-      }
+      function setStatus(msg) { if (statusEl) statusEl.textContent = msg || ""; }
+      function setPlayLabel(isPlaying) { if (btnPlay) btnPlay.textContent = isPlaying ? "Pause" : "Play"; }
 
       function seekToStart() {
         if (start == null) return;
@@ -533,8 +538,7 @@
       function setRangeFromTime(current) {
         if (!range || start == null || end == null) return;
         const p = (current - start) / (end - start);
-        const val = Math.max(0, Math.min(1, p));
-        range.value = String(Math.round(val * 1000));
+        range.value = String(Math.round(Math.max(0, Math.min(1, p)) * 1000));
       }
 
       function setTimeLabel(current) {
@@ -543,20 +547,13 @@
         timeEl.textContent = `${fmtTime(rel)} / ${fmtTime(end - start)}`;
       }
 
-      // Play button: plays segment; after it finishes, pressing Play plays it again.
       if (btnPlay) {
         btnPlay.addEventListener("click", async () => {
           if (!baseUrl || start == null || end == null) return;
 
           ensureLoaded();
 
-          // If we're at/after segment end, restart segment
-          if (audioEl.currentTime >= end - 0.05) {
-            seekToStart();
-          }
-
-          // If user somehow ended up before the segment, jump into it
-          if (audioEl.currentTime < start - 0.05) {
+          if (audioEl.currentTime >= end - 0.05 || audioEl.currentTime < start - 0.05) {
             seekToStart();
           }
 
@@ -575,7 +572,6 @@
         });
       }
 
-      // Slider seek within the segment
       if (range) {
         range.addEventListener("input", () => {
           if (start == null || end == null) return;
@@ -587,18 +583,14 @@
         });
       }
 
-      // Enforce segment boundaries + UI updates
       audioEl.addEventListener("timeupdate", () => {
         if (start == null || end == null) return;
 
         if (audioEl.currentTime >= end) {
-          // stop at end and reset to start so next Play replays
           pauseAndResetToStart();
           return;
         }
-        if (audioEl.currentTime < start) {
-          seekToStart();
-        }
+        if (audioEl.currentTime < start) seekToStart();
 
         setRangeFromTime(audioEl.currentTime);
         setTimeLabel(audioEl.currentTime);
@@ -608,7 +600,6 @@
       audioEl.addEventListener("play", () => setPlayLabel(true));
       audioEl.addEventListener("ended", () => pauseAndResetToStart());
 
-      // init labels
       if (start != null && end != null) {
         if (timeEl) timeEl.textContent = `0:00 / ${fmtTime(end - start)}`;
         if (range) range.value = "0";
@@ -646,15 +637,15 @@
         ` : '';
 
         tr.innerHTML = `
-          <td>${escapeHtml(r.id)}</td>
-          <td>${escapeHtml(r.channel)}</td>
-          <td class="mono">${escapeHtml(r.video_id)}</td>
-          <td>${escapeHtml(r.speaker)}</td>
-          <td>${escapeHtml(r.start_time)}</td>
-          <td>${escapeHtml(r.end_time)}</td>
-          <td class="audio-cell">${audioCellHtml}</td>
-          <td>${textHtml}</td>
-          <td class="mono">${posHtml}</td>
+          <td class="col-id">${escapeHtml(r.id)}</td>
+          <td class="col-channel">${escapeHtml(r.channel)}</td>
+          <td class="col-video mono">${escapeHtml(r.video_id)}</td>
+          <td class="col-speaker">${escapeHtml(r.speaker)}</td>
+          <td class="col-audio audio-cell">${audioCellHtml}</td>
+          <td class="col-text">${textHtml}</td>
+          <td class="col-start">${escapeHtml(r.start_time)}</td>
+          <td class="col-end">${escapeHtml(r.end_time)}</td>
+          <td class="col-pos mono">${posHtml}</td>
         `;
 
         tbody.appendChild(tr);

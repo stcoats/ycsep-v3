@@ -79,51 +79,6 @@ def _parse_channels(channels: Optional[str]) -> List[str]:
     parts = [p for p in parts if p and p.lower() not in {"null", "none", "undefined"}]
     return parts
 
-def _extract_phrases_and_terms(q: str) -> tuple[list[str], list[str]]:
-    """
-    Split query into:
-      - phrases inside double quotes:  "can can"
-      - remaining unquoted terms: can, can, etc.
-
-    Returns (phrases, terms).
-    """
-    q = (q or "").strip()
-    if not q:
-        return [], []
-
-    # Extract "..." phrases (no escaping support; simple and robust)
-    phrases = re.findall(r'"([^"]+)"', q)
-
-    # Remove quoted parts from the query, leaving unquoted terms
-    q_wo_phrases = re.sub(r'"[^"]+"', " ", q)
-    terms = [t for t in re.split(r"\s+", q_wo_phrases.strip()) if t]
-
-    return [p.strip() for p in phrases if p.strip()], terms
-
-
-def _whole_token_pattern(token: str) -> str:
-    token = token.strip()
-    return r"(?i)(^|[^a-z0-9])" + re.escape(token) + r"([^a-z0-9]|$)"
-
-
-def _phrase_pattern(phrase: str) -> str:
-    """
-    Build a case-insensitive regex that matches a sequence of whole tokens
-    in order, allowing non-alphanumeric separators between them.
-
-    Example: "can can" matches "can can", "can, can", "can  can", etc.
-    """
-    toks = [t for t in re.split(r"\s+", phrase.strip()) if t]
-    if not toks:
-        return ""
-
-    # Start boundary + tok1 + separators + tok2 + ... + end boundary
-    pat = r"(?i)(^|[^a-z0-9])" + re.escape(toks[0])
-    for t in toks[1:]:
-        pat += r"[^a-z0-9]+" + re.escape(t)
-    pat += r"([^a-z0-9]|$)"
-    return pat
-
 
 def _parse_csv_list(s: Optional[str]) -> List[str]:
     """
@@ -154,32 +109,113 @@ def _parse_csv_list(s: Optional[str]) -> List[str]:
 
 # ----------------------------
 # Search helpers (global text box)
+#   - supports quoted phrases: "can can"
+#   - supports wildcards: can*  *ing  c*n
+#   - supports explicit regex: re:/.../
 # ----------------------------
-def _token_patterns(q: str) -> List[str]:
+def _extract_phrases_and_terms(q: str) -> Tuple[List[str], List[str]]:
     """
-    Build whole-token, case-insensitive regex patterns for each token in the query.
-    We split on whitespace.
-
-    Example token 'can' matches:
-      - "can"
-      - "can," etc.
-    and avoids matching inside longer strings like "candy".
+    Split query into:
+      - phrases inside double quotes:  "can can"
+      - remaining unquoted terms: can, can*, re:/c.n/
     """
     q = (q or "").strip()
     if not q:
-        return []
+        return [], []
 
-    tokens = [t for t in re.split(r"\s+", q) if t]
-    patterns: List[str] = []
-    for t in tokens:
-        patterns.append(r"(?i)(^|[^a-z0-9])" + re.escape(t) + r"([^a-z0-9]|$)")
-    return patterns
+    phrases = re.findall(r'"([^"]+)"', q)
+    q_wo_phrases = re.sub(r'"[^"]+"', " ", q)
+    terms = [t for t in re.split(r"\s+", q_wo_phrases.strip()) if t]
+
+    phrases = [p.strip() for p in phrases if p and p.strip()]
+    return phrases, terms
+
+
+def _whole_token_pattern(token: str) -> str:
+    token = token.strip()
+    return r"(?i)(^|[^a-z0-9])" + re.escape(token) + r"([^a-z0-9]|$)"
+
+
+def _phrase_pattern(phrase: str) -> str:
+    """
+    Build a case-insensitive regex that matches a sequence of whole tokens in order,
+    allowing non-alphanumeric separators between them.
+
+    Example: "can can" matches "can can", "can, can", "can  can", etc.
+    """
+    toks = [t for t in re.split(r"\s+", phrase.strip()) if t]
+    if not toks:
+        return ""
+
+    pat = r"(?i)(^|[^a-z0-9])" + re.escape(toks[0])
+    for t in toks[1:]:
+        pat += r"[^a-z0-9]+" + re.escape(t)
+    pat += r"([^a-z0-9]|$)"
+    return pat
+
+
+def _classify_term(term: str) -> Tuple[str, str]:
+    """
+    Returns (mode, value)
+      mode:
+        "token"     -> exact whole-token
+        "wildcard"  -> contains '*' wildcard
+        "regex"     -> explicit regex via re:/pattern/
+    """
+    t = term.strip()
+    if t.startswith("re:/") and t.endswith("/"):
+        return "regex", t[4:-1]
+    if "*" in t:
+        return "wildcard", t
+    return "token", t
+
+
+def _wildcard_to_regex(term: str) -> str:
+    """
+    Convert shell-style wildcard to safe whole-token regex.
+
+    can*   -> matches token starting with 'can'
+    *ing   -> matches token ending with 'ing'
+    c*n    -> matches token with c...n inside
+
+    We restrict wildcard expansion to [a-z0-9]* between literal parts.
+    """
+    esc = re.escape(term)
+    esc = esc.replace(r"\*", "[a-z0-9]*")
+    return r"(?i)(^|[^a-z0-9])" + esc + r"([^a-z0-9]|$)"
+
+
+def _safe_regex_or_none(pat: str) -> Optional[str]:
+    """
+    Best-effort guardrail: reject empty patterns and patterns that are likely to be catastrophic.
+    This is not a perfect regex safety check, but it prevents a few common footguns.
+
+    You can loosen/tighten this as needed.
+    """
+    p = (pat or "").strip()
+    if not p:
+        return None
+
+    # Reject trivially broad patterns that match everything
+    if p in {".", "(?s).*", ".*"}:
+        return None
+
+    # Reject very long patterns (cheap sanity check)
+    if len(p) > 500:
+        return None
+
+    # Try compiling in Python to catch syntax errors early
+    try:
+        re.compile(p)
+    except re.error:
+        return None
+
+    return p
 
 
 # ----------------------------
 # Column filters (header filters)
 # ----------------------------
-# Public column keys expected from the frontend -> actual DB columns
 ALLOWED_FILTER_COLS: Dict[str, str] = {
     "id": "segment_id",
     "channel": "channel",
@@ -187,9 +223,6 @@ ALLOWED_FILTER_COLS: Dict[str, str] = {
     "speaker": "speaker",
     "start_time": "start_time",
     "end_time": "end_time",
-    # Usually handled by the global search box; enable if you want:
-    # "text": "text",
-    # "pos_tags": "pos_tags",
 }
 
 
@@ -233,56 +266,76 @@ def _parse_filters(filters_json: Optional[str]) -> Dict[str, List[str]]:
         return {}
 
 
-def _build_where_and_params(text: str, channels: str, filters_json: str) -> Tuple[str, List[str]]:
+def _build_where_and_params(text: str, channels: str, filters_json: str) -> Tuple[str, List[str], List[str]]:
     """
     Correctness-first filtering:
-      - global whole-token regex matching on text OR pos_tags
-      - multi-word queries require ALL tokens to match (AND)
+      - quoted phrases are treated as ordered token sequences (AND across phrases)
+      - unquoted terms are ANDed after de-duping identical tokens
+      - wildcard terms (with *) are supported
+      - explicit regex terms via re:/.../ are supported (guardrailed)
+      - matches are against text OR pos_tags
       - channel filter robust to junk input
       - per-column filters are exact-match IN filters, persistent across sort/search
 
     Returns:
       where_sql like " WHERE 1=1 AND ... "
       params list for DuckDB parameter binding
+      highlight_patterns list (regexes) to send to frontend for highlighting
     """
     selected_channels = _parse_channels(channels)
     filters = _parse_filters(filters_json)
 
     where_clauses = ["1=1"]
     params: List[str] = []
+    highlight_patterns: List[str] = []
 
     q = (text or "").strip()
     if q:
         phrases, terms = _extract_phrases_and_terms(q)
-    
-        # 1) Phrase constraints (ALL phrases must match somewhere)
-        phrase_clauses = []
+
+        # Phrase constraints (ALL phrases must match somewhere)
+        phrase_clauses: List[str] = []
         for ph in phrases:
             pat = _phrase_pattern(ph)
             if pat:
                 phrase_clauses.append("(regexp_matches(text, ?) OR regexp_matches(pos_tags, ?))")
                 params.extend([pat, pat])
-    
-        # 2) Term constraints (ALL UNIQUE tokens must match somewhere)
-        # Dedup fixes: "can can" (unquoted) won't degrade to "can" via A AND A,
-        # it will explicitly become just one constraint on "can".
+                highlight_patterns.append(pat)
+
+        # Term constraints (ALL UNIQUE tokens must match somewhere)
         seen = set()
-        term_clauses = []
+        term_clauses: List[str] = []
+
         for t in terms:
             tlow = t.lower()
             if tlow in seen:
                 continue
             seen.add(tlow)
-    
-            pat = _whole_token_pattern(t)
+
+            mode, value = _classify_term(t)
+
+            if mode == "token":
+                pat = _whole_token_pattern(value)
+            elif mode == "wildcard":
+                pat = _wildcard_to_regex(value)
+            elif mode == "regex":
+                safe = _safe_regex_or_none(value)
+                if not safe:
+                    # If user regex is invalid/unsafe, force a no-match (instead of 500)
+                    # so the UI shows 0 results rather than blowing up the server.
+                    pat = r"(?!x)x"
+                else:
+                    pat = safe
+            else:
+                continue
+
             term_clauses.append("(regexp_matches(text, ?) OR regexp_matches(pos_tags, ?))")
             params.extend([pat, pat])
-    
-        # Combine: require ALL phrase matches AND ALL term matches
+            highlight_patterns.append(pat)
+
         all_clauses = phrase_clauses + term_clauses
         if all_clauses:
             where_clauses.append("(" + " AND ".join(all_clauses) + ")")
-
 
     if selected_channels:
         where_clauses.append("channel IN (" + ",".join(["?"] * len(selected_channels)) + ")")
@@ -295,7 +348,7 @@ def _build_where_and_params(text: str, channels: str, filters_json: str) -> Tupl
         params.extend(values)
 
     where_sql = " WHERE " + " AND ".join(where_clauses)
-    return where_sql, params
+    return where_sql, params, highlight_patterns
 
 
 # ----------------------------
@@ -334,10 +387,9 @@ def suggest_values(
 
         db_col = ALLOWED_FILTER_COLS[col]
 
-        where_sql, params = _build_where_and_params(text, channels, filters)
+        where_sql, params, _ = _build_where_and_params(text, channels, filters)
 
         # Prefix match: LIKE 'prefix%'
-        # NOTE: If you want case-insensitive, use ILIKE (DuckDB supports ILIKE).
         sql = f"""
             SELECT DISTINCT {db_col} AS v
             FROM segments
@@ -379,7 +431,7 @@ def get_paginated_data(
         sort_col = sort_map.get(sort, "segment_id")
         dir_sql = "DESC" if direction.lower() == "desc" else "ASC"
 
-        where_sql, params = _build_where_and_params(text, channels, filters)
+        where_sql, params, highlight_patterns = _build_where_and_params(text, channels, filters)
 
         count_sql = f"SELECT count(*) FROM segments{where_sql};"
         data_sql = f"""
@@ -402,7 +454,12 @@ def get_paginated_data(
         total = int(con.execute(count_sql, params).fetchone()[0])
         df = con.execute(data_sql, params + [size, offset]).df()
 
-        return {"total": total, "data": df.to_dict(orient="records")}
+        # Send highlight patterns so frontend can highlight text/pos cells
+        return {
+            "total": total,
+            "data": df.to_dict(orient="records"),
+            "highlight": highlight_patterns[:25],  # cap just in case
+        }
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -421,7 +478,7 @@ def download_csv(
     """
     try:
         offset = (page - 1) * size
-        where_sql, params = _build_where_and_params(text, channels, filters)
+        where_sql, params, _ = _build_where_and_params(text, channels, filters)
 
         query = f"""
             SELECT
@@ -463,4 +520,3 @@ def get_audio(id: str):
         status_code=400,
         content={"detail": "Use audio_url from data response"},
     )
-

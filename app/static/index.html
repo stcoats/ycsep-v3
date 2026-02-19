@@ -492,38 +492,89 @@
       csvBtn.classList.remove('d-none');
     }
 
-    function renderTable(rows) {
-      const tbody = document.querySelector('#dataTable tbody');
-      tbody.innerHTML = '';
+function parseMediaFragment(url) {
+  // expects ...#t=start,end
+  const s = String(url || "");
+  const i = s.indexOf("#t=");
+  if (i === -1) return { base: s, start: null, end: null };
 
-      rows.forEach(r => {
-        const audioUrl = r.audio_url || '';
-        const tr = document.createElement('tr');
+  const base = s.slice(0, i);
+  const frag = s.slice(i + 3); // after "#t="
+  const parts = frag.split(",");
+  const start = parts[0] ? parseFloat(parts[0]) : null;
+  const end = parts[1] ? parseFloat(parts[1]) : null;
+  return {
+    base,
+    start: Number.isFinite(start) ? start : null,
+    end: Number.isFinite(end) ? end : null
+  };
+}
 
-        // Highlight only Text and POS (you can expand to other fields if you want)
-        const textHtml = highlightText(r.text);
-        const posHtml  = highlightText(r.pos_tags);
-
-        tr.innerHTML = `
-          <td>${escapeHtml(r.id)}</td>
-          <td>${escapeHtml(r.channel)}</td>
-          <td class="mono">${escapeHtml(r.video_id)}</td>
-          <td>${escapeHtml(r.speaker)}</td>
-          <td>${escapeHtml(r.start_time)}</td>
-          <td>${escapeHtml(r.end_time)}</td>
-          <td class="audio-cell">
-            ${audioUrl ? `
-              <audio controls preload="none">
-                <source src="${escapeHtml(audioUrl)}" type="audio/wav">
-              </audio>
-            ` : ''}
-          </td>
-          <td>${textHtml}</td>
-          <td class="mono">${posHtml}</td>
-        `;
-        tbody.appendChild(tr);
+    function attachSegmentPlayback(audioEl, start, end) {
+      if (start == null || end == null) return;
+    
+      // If user hits play again while already at/after the end, jump back
+      audioEl.addEventListener("play", () => {
+        if (audioEl.currentTime >= end - 0.05 || audioEl.currentTime < start - 0.05) {
+          try { audioEl.currentTime = start; } catch (e) {}
+        }
+      });
+    
+      // Hard-stop at segment end (works even if browser ignores #t=end)
+      audioEl.addEventListener("timeupdate", () => {
+        if (audioEl.currentTime >= end) {
+          audioEl.pause();
+          try { audioEl.currentTime = start; } catch (e) {}
+        }
+      });
+    
+      // Some browsers fire ended on the full file; still reset to start
+      audioEl.addEventListener("ended", () => {
+        try { audioEl.currentTime = start; } catch (e) {}
       });
     }
+
+    function renderTable(rows) {
+  const tbody = document.querySelector('#dataTable tbody');
+  tbody.innerHTML = '';
+
+  rows.forEach(r => {
+    const audioUrl = r.audio_url || '';
+    const { base, start, end } = parseMediaFragment(audioUrl);
+
+    const tr = document.createElement('tr');
+
+    const textHtml = highlightText(r.text);
+    const posHtml  = highlightText(r.pos_tags);
+
+    tr.innerHTML = `
+      <td>${escapeHtml(r.id)}</td>
+      <td>${escapeHtml(r.channel)}</td>
+      <td class="mono">${escapeHtml(r.video_id)}</td>
+      <td>${escapeHtml(r.speaker)}</td>
+      <td>${escapeHtml(r.start_time)}</td>
+      <td>${escapeHtml(r.end_time)}</td>
+      <td class="audio-cell">
+        ${base ? `
+          <audio controls preload="none" data-start="${start ?? ''}" data-end="${end ?? ''}">
+            <source src="${escapeHtml(base)}" type="audio/wav">
+          </audio>
+        ` : ''}
+      </td>
+      <td>${textHtml}</td>
+      <td class="mono">${posHtml}</td>
+    `;
+
+    tbody.appendChild(tr);
+
+    // Attach segment behavior after element exists
+    const audioEl = tr.querySelector("audio");
+    if (audioEl && start != null && end != null) {
+      attachSegmentPlayback(audioEl, start, end);
+    }
+  });
+}
+
 
     function renderPagination() {
       const container = document.getElementById('paginationControls');
@@ -689,4 +740,5 @@
   </script>
 </body>
 </html>
+
 

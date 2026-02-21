@@ -6,7 +6,7 @@ import urllib.request
 def get_connection():
     # Segments DB (served from Allas)
     db_url = "https://a3s.fi/swift/v1/YCSEP_v2/ycsep_v4_segments.duckdb"
-    db_path = "/tmp/ycsep_v4_segments.duckdb"  # make this match the URL
+    db_path = "/tmp/ycsep_v5_segments.duckdb"  # make this match the URL
 
     # Writable directory for DuckDB extensions in Rahti
     ext_path = "/tmp/duckdb_extensions"
@@ -37,3 +37,4 @@ def get_connection():
         pass
 
     return con
+

@@ -340,7 +340,7 @@
         .replaceAll('<', '&lt;')
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
+        // .replaceAll("'", '&#039;'); // removed because it messed up rendering
     }
 
     function normalizePatternForJS(pat) {
@@ -350,50 +350,38 @@
     }
 
     function highlightText(plainText) {
-      const raw = decodeEntities(plainText);   // <-- add this line
+      const raw = decodeEntities(plainText); // safe even if nothing to decode
       const s = String(raw ?? "");
       if (!s) return "";
       if (!highlightPatterns || highlightPatterns.length === 0) return escapeHtml(s);
     
-      let html = escapeHtml(s);
+      // Sentinel markers that won't appear in normal text
+      const MS = "\u0000HL_START\u0000";
+      const ME = "\u0000HL_END\u0000";
+    
+      let out = s;
+    
       const patterns = highlightPatterns.slice(0, 25);
       for (const pat of patterns) {
         try {
           const src = normalizePatternForJS(pat);
           const re = new RegExp(src, "gi");
-          html = html.replace(re, (m) => `<mark class="hl">${m}</mark>`);
+    
+          // Wrap match with sentinels (NOT HTML)
+          out = out.replace(re, (m) => `${MS}${m}${ME}`);
         } catch (e) {}
       }
-      return html;
+    
+      // Now escape everything (so user text can't inject HTML)
+      let esc = escapeHtml(out);
+    
+      // And finally turn sentinels into real markup
+      esc = esc
+        .replaceAll(MS, '<mark class="hl">')
+        .replaceAll(ME, "</mark>");
+    
+      return esc;
     }
-
-    const fetchSuggest = debounce((col, prefix) => {
-      const textVal = document.getElementById('searchInput').value.trim();
-      const selected = getSelectedChannels();
-      const channelsParam = encodeURIComponent(selected.join(','));
-      const filtersParam = filtersToParam();
-
-      const url = `/suggest?col=${encodeURIComponent(col)}` +
-                  `&prefix=${encodeURIComponent(prefix)}` +
-                  `&text=${encodeURIComponent(textVal)}` +
-                  `&channels=${channelsParam}` +
-                  `&filters=${filtersParam}` +
-                  `&limit=20`;
-
-      fetch(url)
-        .then(r => r.json())
-        .then(values => {
-          const dl = document.getElementById(`dl_${col}`);
-          if (!dl) return;
-          dl.innerHTML = "";
-          (values || []).forEach(v => {
-            const opt = document.createElement("option");
-            opt.value = v;
-            dl.appendChild(opt);
-          });
-        })
-        .catch(err => console.error("suggest failed", err));
-    }, 200);
 
     function initColumnFilters() {
       FILTERABLE_COLS.forEach(col => {
@@ -850,6 +838,7 @@
   </script>
 </body>
 </html>
+
 
 
 

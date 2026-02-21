@@ -350,10 +350,11 @@
     }
 
     function highlightText(plainText) {
-      const s = String(plainText ?? "");
+      const raw = decodeEntities(plainText);   // <-- add this line
+      const s = String(raw ?? "");
       if (!s) return "";
       if (!highlightPatterns || highlightPatterns.length === 0) return escapeHtml(s);
-
+    
       let html = escapeHtml(s);
       const patterns = highlightPatterns.slice(0, 25);
       for (const pat of patterns) {
@@ -445,6 +446,13 @@
       } catch (e) {}
     }
 
+    function decodeEntities(s) {
+      // Decodes things like "it&#039;s" -> "it's", "&quot;" -> '"'
+      const ta = document.createElement("textarea");
+      ta.innerHTML = String(s ?? "");
+      return ta.value;
+    }
+    
     function restoreState() {
       try {
         const raw = localStorage.getItem("ycsep_state");
@@ -842,5 +850,6 @@
   </script>
 </body>
 </html>
+
 
 

@@ -135,25 +135,32 @@ def _extract_phrases_and_terms(q: str) -> Tuple[List[str], List[str]]:
 
 def _whole_token_pattern(token: str) -> str:
     token = token.strip()
-    return r"(?i)(^|[^a-z0-9])" + re.escape(token) + r"([^a-z0-9]|$)"
+    return r"(?i)\b" + re.escape(token) + r"\b"
 
 
 def _phrase_pattern(phrase: str) -> str:
     """
     Build a case-insensitive regex that matches a sequence of whole tokens in order,
     allowing non-alphanumeric separators between them.
-
-    Example: "can can" matches "can can", "can, can", "can  can", etc.
     """
     toks = [t for t in re.split(r"\s+", phrase.strip()) if t]
     if not toks:
         return ""
 
-    pat = r"(?i)(^|[^a-z0-9])" + re.escape(toks[0])
+    pat = r"(?i)\b" + re.escape(toks[0])
     for t in toks[1:]:
         pat += r"[^a-z0-9]+" + re.escape(t)
-    pat += r"([^a-z0-9]|$)"
+    pat += r"\b"
     return pat
+
+
+def _wildcard_to_regex(term: str) -> str:
+    """
+    Convert shell-style wildcard to safe whole-token regex.
+    """
+    esc = re.escape(term)
+    esc = esc.replace(r"\*", "[a-z0-9]*")
+    return r"(?i)\b" + esc + r"\b"
 
 
 def _classify_term(term: str) -> Tuple[str, str]:
@@ -170,22 +177,6 @@ def _classify_term(term: str) -> Tuple[str, str]:
     if "*" in t:
         return "wildcard", t
     return "token", t
-
-
-def _wildcard_to_regex(term: str) -> str:
-    """
-    Convert shell-style wildcard to safe whole-token regex.
-
-    can*   -> matches token starting with 'can'
-    *ing   -> matches token ending with 'ing'
-    c*n    -> matches token with c...n inside
-
-    We restrict wildcard expansion to [a-z0-9]* between literal parts.
-    """
-    esc = re.escape(term)
-    esc = esc.replace(r"\*", "[a-z0-9]*")
-    return r"(?i)(^|[^a-z0-9])" + esc + r"([^a-z0-9]|$)"
-
 
 def _safe_regex_or_none(pat: str) -> Optional[str]:
     """
@@ -590,4 +581,5 @@ def get_audio(id: str):
         status_code=400,
         content={"detail": "Use audio_url from data response"},
     )
+
 

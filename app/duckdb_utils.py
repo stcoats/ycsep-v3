@@ -2,7 +2,7 @@ import duckdb
 import os
 import urllib.request
 
-#updated to merged segments#
+#updated to merged segments, ~15 sec. per segment#
 def get_connection():
     db_url = "https://a3s.fi/swift/v1/YCSEP_v2/ycsep_v5_segments_merged.duckdb"
     db_path = "/tmp/ycsep_v5_segments_merged.duckdb"

@@ -5,7 +5,9 @@ import subprocess
 import urllib.parse
 import io
 import json
+import os
 import re
+import threading
 from typing import Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, Query
@@ -34,6 +36,13 @@ def serve_index():
 
 # Global connection (correctness-first; reuse one connection)
 con = get_connection()
+con_lock = threading.RLock()
+
+ALLOWED_AUDIO_HOSTS = {
+    host.strip().lower()
+    for host in os.getenv("YCSEP_ALLOWED_AUDIO_HOSTS", "a3s.fi").split(",")
+    if host.strip()
+}
 
 
 # ----------------------------
@@ -344,15 +353,26 @@ def _build_where_and_params(text: str, channels: str, filters_json: str) -> Tupl
     return where_sql, params, highlight_patterns
 
 
+def _validate_audio_url(url: str) -> Tuple[bool, str]:
+    parsed = urllib.parse.urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https":
+        return False, "audio URL must use https"
+    if not host or host not in ALLOWED_AUDIO_HOSTS:
+        return False, "audio URL host is not allowed"
+    return True, ""
+
+
 # ----------------------------
 # Routes
 # ----------------------------
 @app.get("/channels")
 def get_channels():
     try:
-        rows = con.execute(
-            "SELECT DISTINCT channel FROM segments WHERE channel IS NOT NULL ORDER BY channel"
-        ).fetchall()
+        with con_lock:
+            rows = con.execute(
+                "SELECT DISTINCT channel FROM segments WHERE channel IS NOT NULL ORDER BY channel"
+            ).fetchall()
         return [r[0] for r in rows]
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -391,7 +411,8 @@ def suggest_values(
             ORDER BY v
             LIMIT ?;
         """
-        rows = con.execute(sql, params + [p + "%", limit]).fetchall()
+        with con_lock:
+            rows = con.execute(sql, params + [p + "%", limit]).fetchall()
         return [r[0] for r in rows if r and r[0] is not None]
 
     except Exception as e:
@@ -444,8 +465,9 @@ def get_paginated_data(
             LIMIT ? OFFSET ?;
         """
 
-        total = int(con.execute(count_sql, params).fetchone()[0])
-        df = con.execute(data_sql, params + [size, offset]).df()
+        with con_lock:
+            total = int(con.execute(count_sql, params).fetchone()[0])
+            df = con.execute(data_sql, params + [size, offset]).df()
 
         # Send highlight patterns so frontend can highlight text/pos cells
         return {
@@ -476,6 +498,10 @@ def clip(
             return JSONResponse(status_code=400, content={"error": "clip too long"})
 
         parsed = urllib.parse.urlparse(url)
+        ok, error = _validate_audio_url(url)
+        if not ok:
+            return JSONResponse(status_code=400, content={"error": error})
+
         basename = parsed.path.rsplit("/", 1)[-1] or "audio"
         stem = basename.rsplit(".", 1)[0]
         out_name = f"{stem}_{start:.2f}_{end:.2f}.{fmt}"
@@ -531,6 +557,8 @@ def download_csv(
     text: str = Query(""),
     page: int = Query(1, ge=1),
     size: int = Query(100, ge=1, le=500),
+    sort: str = Query("id"),
+    direction: str = Query("asc"),
     channels: str = Query(""),
     filters: str = Query("", description="JSON dict of active column filters"),
 ):
@@ -540,6 +568,18 @@ def download_csv(
     try:
         offset = (page - 1) * size
         where_sql, params, _ = _build_where_and_params(text, channels, filters)
+        sort_map = {
+            "id": "segment_id",
+            "channel": "channel",
+            "video_id": "video_id",
+            "speaker": "speaker",
+            "start_time": "start_time",
+            "end_time": "end_time",
+            "text": "text",
+            "pos_tags": "pos_tags",
+        }
+        sort_col = sort_map.get(sort, "segment_id")
+        dir_sql = "DESC" if direction.lower() == "desc" else "ASC"
 
         query = f"""
             SELECT
@@ -554,11 +594,12 @@ def download_csv(
                 audio_url
             FROM segments
             {where_sql}
-            ORDER BY segment_id ASC
+            ORDER BY {sort_col} {dir_sql}
             LIMIT ? OFFSET ?;
         """
 
-        df = con.execute(query, params + [size, offset]).df()
+        with con_lock:
+            df = con.execute(query, params + [size, offset]).df()
 
         buf = io.StringIO()
         df.to_csv(buf, index=False)

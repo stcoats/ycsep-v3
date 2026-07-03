@@ -459,6 +459,7 @@
       const csvBtn = document.getElementById('csvBtn');
       csvBtn.href = `/download/csv?page=${currentPage}&size=${pageSize}` +
                     `&text=${encodeURIComponent(textVal)}` +
+                    `&sort=${encodeURIComponent(currentSort)}&direction=${encodeURIComponent(currentDirection)}` +
                     `&channels=${channelsParam}` +
                     `&filters=${filtersParam}`;
       csvBtn.classList.remove('d-none');
@@ -766,7 +767,7 @@
     }
 
     function loadChannels() {
-      fetch('/channels')
+      return fetch('/channels')
         .then(res => res.json())
         .then(channels => {
           const container = document.getElementById('channelCheckboxes');
@@ -817,12 +818,11 @@
 
     window.addEventListener('DOMContentLoaded', () => {
       restoreState();
-      loadChannels();
       initColumnFilters();
       FILTERABLE_COLS.forEach(renderChips);
 
       initHelpPopover();
-      loadData();
+      loadChannels().finally(loadData);
 
       document.getElementById('searchInput').addEventListener('keydown', e => {
         if (e.key === 'Enter') doSearch();
